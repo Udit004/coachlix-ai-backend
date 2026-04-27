@@ -110,15 +110,15 @@ export class GeminiLiveBridge {
         onmessage: async (message) => {
           await this.handleGeminiMessage(message);
         },
-        onerror: async (error) => {
-          this.fastify.log.error({ error, clientId: this.clientId }, 'Gemini live error');
+        onerror: async (err) => {
+          this.fastify.log.error({ err, clientId: this.clientId }, 'Gemini live error');
           this.onServerEvent({
             type: 'gemini_live_error',
-            message: error?.message || 'Gemini live error'
+            message: err?.message || 'Gemini live error'
           });
           await traceLiveEvent('gemini_live_error', {
             clientId: this.clientId,
-            message: error?.message || 'unknown_error'
+            message: err?.message || 'unknown_error'
           });
         },
         onclose: async (event) => {

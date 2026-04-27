@@ -1,10 +1,13 @@
 import { buildServer } from './app.js';
 import { env } from './config/env.js';
+import { connectMongo, disconnectMongo } from './db/mongo.js';
 
 const start = async () => {
   const fastify = await buildServer();
 
   try {
+    await connectMongo();
+
     await fastify.listen({
       host: env.host,
       port: env.port
@@ -17,6 +20,7 @@ const start = async () => {
     const shutdown = async (signal) => {
       fastify.log.info({ signal }, 'Graceful shutdown started');
       await fastify.close();
+      await disconnectMongo();
       process.exit(0);
     };
 

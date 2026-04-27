@@ -1,10 +1,33 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
+import mongoose from 'mongoose';
 
 import { GeminiLiveBridge } from '../ai/geminiLiveBridge.js';
 import { env } from '../config/env.js';
+import ChatSession from '../models/ChatSession.js';
 
 const clients = new Map();
+
+const errorMessage = (err, fallback = 'Unknown error') => {
+  if (!err) {
+    return fallback;
+  }
+
+  if (typeof err?.message === 'string' && err.message.trim()) {
+    return err.message;
+  }
+
+  if (typeof err === 'string' && err.trim()) {
+    return err;
+  }
+
+  try {
+    const serialized = JSON.stringify(err);
+    return serialized && serialized !== '{}' ? serialized : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 function safeSend(socket, payload) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -32,12 +55,95 @@ function broadcast(payload, excludeClientId = null) {
   }
 }
 
+const normalizeUserId = (value, clientId) => {
+  const trimmed = String(value || '').trim();
+  return trimmed || `anon:${clientId}`;
+};
+
+const buildTitleFromMessage = (message) => {
+  const trimmed = String(message || '').trim();
+  if (!trimmed) {
+    return 'Live voice chat';
+  }
+
+  const snippet = trimmed.substring(0, 50);
+  return snippet.length < 50 ? snippet : `${snippet}...`;
+};
+
+async function ensureChatSession({ userId, chatId, plan, title }) {
+  if (chatId && mongoose.Types.ObjectId.isValid(chatId)) {
+    const existing = await ChatSession.findById(chatId);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  const created = await ChatSession.create({
+    userId,
+    title: String(title || '').trim() || 'Live voice chat',
+    plan: String(plan || '').trim() || 'general',
+    messages: []
+  });
+
+  return created;
+}
+
+async function appendMessage(chatId, role, content) {
+  const trimmed = String(content || '').trim();
+  if (!chatId || !trimmed) {
+    return null;
+  }
+
+  return ChatSession.findByIdAndUpdate(
+    chatId,
+    {
+      $push: {
+        messages: {
+          role,
+          content: trimmed,
+          timestamp: new Date()
+        }
+      },
+      $inc: { messageCount: 1 },
+      $set: {
+        lastMessage: trimmed.substring(0, 200),
+        updatedAt: new Date()
+      }
+    },
+    { new: true }
+  );
+}
+
 export async function socketRoutes(fastify) {
   fastify.get('/ws/live', { websocket: true }, (socket, request) => {
     const clientId = randomUUID();
     let liveBridge = null;
     let audioChunkCount = 0;
     let sessionStartedAt = null;
+    let userId = normalizeUserId('', clientId);
+    let activeChatId = null;
+    let activePlan = 'general';
+    let pendingAiText = '';
+
+    const flushPendingAiText = async () => {
+      if (!pendingAiText.trim()) {
+        return;
+      }
+
+      const textToPersist = pendingAiText;
+      pendingAiText = '';
+      await appendMessage(activeChatId, 'ai', textToPersist);
+    };
+
+    const handleGeminiServerEvent = async (eventPayload) => {
+      if (eventPayload?.type === 'gemini_text' && eventPayload.text) {
+        pendingAiText += eventPayload.text;
+      }
+
+      if (eventPayload?.type === 'gemini_turn_complete') {
+        await flushPendingAiText();
+      }
+    };
 
     clients.set(clientId, socket);
 
@@ -86,21 +192,80 @@ export async function socketRoutes(fastify) {
             return;
           }
 
+          userId = normalizeUserId(parsed.userId, clientId);
+          activePlan = String(parsed.plan || '').trim() || 'general';
+
+          let chatSession;
+          try {
+            chatSession = await ensureChatSession({
+              userId,
+              chatId: parsed.chatId,
+              plan: activePlan,
+              title: parsed.title
+            });
+            activeChatId = chatSession._id.toString();
+          } catch (err) {
+            fastify.log.error(
+              {
+                err,
+                clientId,
+                userId,
+                chatId: parsed.chatId || null,
+                plan: activePlan
+              },
+              'Failed to initialize chat session in MongoDB'
+            );
+
+            safeSend(socket, {
+              type: 'error',
+              message: `Unable to initialize chat storage: ${errorMessage(err)}`
+            });
+            return;
+          }
+
           if (!liveBridge) {
             liveBridge = new GeminiLiveBridge({
               fastify,
               clientId,
               onServerEvent: (eventPayload) => {
                 safeSend(socket, eventPayload);
+
+                Promise.resolve(handleGeminiServerEvent(eventPayload)).catch(
+                  (err) => {
+                    fastify.log.error(
+                      { err, clientId, activeChatId },
+                      'Failed persisting Gemini server event'
+                    );
+                  }
+                );
               }
             });
           }
 
-          await liveBridge.connect({
-            systemInstruction: parsed.systemInstruction,
-            voiceName: parsed.voiceName,
-            responseModalities: parsed.responseModalities
-          });
+          try {
+            await liveBridge.connect({
+              systemInstruction: parsed.systemInstruction,
+              voiceName: parsed.voiceName,
+              responseModalities: parsed.responseModalities
+            });
+          } catch (err) {
+            fastify.log.error(
+              {
+                err,
+                clientId,
+                activeChatId,
+                model: env.geminiLiveModel,
+                apiVersion: env.geminiApiVersion
+              },
+              'Failed to connect Gemini live session'
+            );
+
+            safeSend(socket, {
+              type: 'error',
+              message: `Unable to start Gemini live session: ${errorMessage(err)}`
+            });
+            return;
+          }
 
           sessionStartedAt = Date.now();
           audioChunkCount = 0;
@@ -118,8 +283,32 @@ export async function socketRoutes(fastify) {
           safeSend(socket, {
             type: 'session_started',
             model: env.geminiLiveModel,
-            voiceName: parsed.voiceName || env.geminiVoiceName
+            voiceName: parsed.voiceName || env.geminiVoiceName,
+            chatId: activeChatId,
+            userId
           });
+
+          return;
+        }
+
+        if (parsed.type === 'user_transcript') {
+          const transcript = String(parsed.text || '').trim();
+          const isFinal = parsed.isFinal !== false;
+
+          if (isFinal && transcript) {
+            const updatedChat = await appendMessage(activeChatId, 'user', transcript);
+
+            if (updatedChat && updatedChat.title === 'Live voice chat') {
+              updatedChat.title = buildTitleFromMessage(transcript);
+              await updatedChat.save();
+            }
+
+            safeSend(socket, {
+              type: 'chat_saved',
+              chatId: activeChatId,
+              role: 'user'
+            });
+          }
 
           return;
         }
@@ -162,6 +351,10 @@ export async function socketRoutes(fastify) {
             return;
           }
 
+          if (parsed.text) {
+            await appendMessage(activeChatId, 'user', parsed.text);
+          }
+
           await liveBridge.sendTextInput(parsed.text || '', parsed.turnComplete ?? true);
           return;
         }
@@ -195,6 +388,8 @@ export async function socketRoutes(fastify) {
             liveBridge = null;
           }
 
+          await flushPendingAiText();
+
           fastify.log.info(
             {
               clientId,
@@ -212,11 +407,18 @@ export async function socketRoutes(fastify) {
           type: 'error',
           message: `Unknown event type: ${parsed.type || 'undefined'}`
         });
-      } catch (error) {
-        fastify.log.error({ error, clientId }, 'Live WS event handling failed');
+      } catch (err) {
+        fastify.log.error(
+          {
+            err,
+            clientId,
+            eventType: parsed?.type || 'unknown'
+          },
+          'Live WS event handling failed'
+        );
         safeSend(socket, {
           type: 'error',
-          message: error?.message || 'Live event handling failed'
+          message: errorMessage(err, 'Live event handling failed')
         });
       }
     });
@@ -225,8 +427,9 @@ export async function socketRoutes(fastify) {
       if (liveBridge) {
         try {
           await liveBridge.close();
-        } catch (error) {
-          fastify.log.error({ error, clientId }, 'Failed closing live bridge');
+          await flushPendingAiText();
+        } catch (err) {
+          fastify.log.error({ err, clientId }, 'Failed closing live bridge');
         }
       }
 
@@ -248,8 +451,8 @@ export async function socketRoutes(fastify) {
       });
     });
 
-    socket.on('error', (error) => {
-      fastify.log.error({ error, clientId }, 'WebSocket client error');
+    socket.on('error', (err) => {
+      fastify.log.error({ err, clientId }, 'WebSocket client error');
     });
 
     fastify.log.info(

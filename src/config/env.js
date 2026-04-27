@@ -20,6 +20,7 @@ export const env = {
   host: process.env.HOST || '0.0.0.0',
   port: toNumber(process.env.PORT, 8080),
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
+  mongodbUri: process.env.MONGODB_URI || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiApiVersion: process.env.GEMINI_API_VERSION || 'v1alpha',
   geminiLiveModel:
