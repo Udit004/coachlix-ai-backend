@@ -2,27 +2,35 @@ import { chatService } from './chatService.js';
 import { verifyUserToken } from '../../shared/auth.js';
 import { env } from '../../config/env.js';
 
+const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
 const sendSseEvent = (reply, payload) => {
   reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
 };
 
-const getAllowedOrigins = () =>
-  String(env.frontendOrigin || '')
+const parseAllowedOrigins = (value) =>
+  String(value || '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+const isAllowedOrigin = (origin, allowedOrigins) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  return LOCAL_ORIGIN_PATTERN.test(origin);
+};
+
+const getAllowedOrigins = () =>
+  parseAllowedOrigins(env.frontendOrigin);
+
 const buildSseCorsHeaders = (request) => {
   const requestOrigin = request.headers.origin;
   const allowedOrigins = getAllowedOrigins();
-  const isAllowedOrigin =
-    !requestOrigin ||
-    allowedOrigins.length === 0 ||
-    allowedOrigins.includes(requestOrigin);
+  const originAllowed = isAllowedOrigin(requestOrigin, allowedOrigins);
 
   return {
     'Access-Control-Allow-Origin':
-      isAllowedOrigin && requestOrigin ? requestOrigin : allowedOrigins[0] || '*',
+      originAllowed && requestOrigin ? requestOrigin : allowedOrigins[0] || '*',
     'Access-Control-Allow-Credentials': 'true',
     Vary: 'Origin',
   };

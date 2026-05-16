@@ -6,11 +6,22 @@ import websocket from '@fastify/websocket';
 
 import { env } from '../config/env.js';
 
-export async function registerCorePlugins(fastify) {
-  const allowedOrigins = String(env.frontendOrigin || '')
+const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
+const parseAllowedOrigins = (value) =>
+  String(value || '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+
+const isAllowedOrigin = (origin, allowedOrigins) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  return LOCAL_ORIGIN_PATTERN.test(origin);
+};
+
+export async function registerCorePlugins(fastify) {
+  const allowedOrigins = parseAllowedOrigins(env.frontendOrigin);
     console.log('Allowed Origins:', allowedOrigins);
 
   await fastify.register(sensible);
@@ -30,7 +41,7 @@ export async function registerCorePlugins(fastify) {
 
   await fastify.register(cors, {
     origin: (origin, cb) => {
-      if (!origin || hardcodedOrigins.includes(origin)) {
+      if (isAllowedOrigin(origin, [...allowedOrigins, ...hardcodedOrigins])) {
         cb(null, true);
         return;
       }
