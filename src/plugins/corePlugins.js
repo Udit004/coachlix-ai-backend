@@ -11,6 +11,7 @@ export async function registerCorePlugins(fastify) {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+    console.log('Allowed Origins:', allowedOrigins);
 
   await fastify.register(sensible);
 
