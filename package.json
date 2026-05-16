@@ -16,16 +16,24 @@
   "dependencies": {
     "@fastify/cors": "^10.0.2",
     "@fastify/helmet": "^13.0.1",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/sensible": "^6.0.3",
     "@fastify/websocket": "^11.0.2",
     "@google/genai": "^1.5.1",
-    "@langchain/core": "^0.3.62",
-    "@langchain/google-genai": "^0.2.13",
+    "@langchain/core": "^1.1.41",
+    "@langchain/google-genai": "^2.1.28",
+    "@langchain/langgraph": "^1.2.9",
+    "@langchain/mongodb": "^1.1.0",
+    "@upstash/redis": "^1.38.0",
+    "cloudinary": "^2.10.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.2.1",
+    "firebase-admin": "^13.10.0",
+    "langchain": "^1.3.4",
     "langsmith": "^0.3.37",
     "mongoose": "^9.5.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "nodemon": "^3.1.7",

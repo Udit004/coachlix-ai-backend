@@ -1,12 +1,14 @@
 import { buildServer } from './app.js';
 import { env } from './config/env.js';
 import { connectMongo, disconnectMongo } from './db/mongo.js';
+import { setupAIModule } from './services/aiIntegration.js';
 
 const start = async () => {
   const fastify = await buildServer();
 
   try {
     await connectMongo();
+    await setupAIModule(env.geminiApiKey);
 
     await fastify.listen({
       host: env.host,

@@ -21,6 +21,17 @@ export const env = {
   port: toNumber(process.env.PORT, 8080),
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
   mongodbUri: process.env.MONGODB_URI || '',
+  upstashRedisRestUrl: process.env.UPSTASH_REDIS_REST_URL || '',
+  upstashRedisRestToken: process.env.UPSTASH_REDIS_REST_TOKEN || '',
+  firebaseAdminProjectId: process.env.FIREBASE_ADMIN_PROJECT_ID || '',
+  firebaseAdminPrivateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY || '',
+  firebaseAdminClientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL || '',
+  firebaseAdminCredentialsBase64:
+    process.env.FIREBASE_ADMIN_CREDENTIALS_BASE64 || '',
+  firebaseAdminCredentials: process.env.FIREBASE_ADMIN_CREDENTIALS || '',
+  cloudName: process.env.CLOUD_NAME || '',
+  cloudApiKey: process.env.CLOUD_API_KEY || '',
+  cloudApiSecret: process.env.CLOUD_API_SECRET || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiApiVersion: process.env.GEMINI_API_VERSION || 'v1alpha',
   geminiLiveModel:
