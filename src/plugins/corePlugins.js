@@ -20,20 +20,20 @@ export async function registerCorePlugins(fastify) {
     contentSecurityPolicy: false
   });
 
-  await fastify.register(cors, {
-    origin: (origin, cb) => {
-      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-        cb(null, true);
-        return;
-      }
-
-      cb(new Error(`Origin ${origin} is not allowed by CORS`), false);
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
-    exposedHeaders: ['Content-Type', 'Cache-Control'],
-    credentials: true
-  });
+  // await fastify.register(cors, {
+  //   origin: (origin, cb) => {
+  //     if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+  //       cb(null, true);
+  //       return;
+  //     }
+  //
+  //     cb(new Error(`Origin ${origin} is not allowed by CORS`), false);
+  //   },
+  //   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  //   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
+  //   exposedHeaders: ['Content-Type', 'Cache-Control'],
+  //   credentials: true
+  // });
 
   await fastify.register(multipart, {
     limits: {
