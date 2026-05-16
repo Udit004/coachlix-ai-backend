@@ -7,6 +7,10 @@ import websocket from '@fastify/websocket';
 import { env } from '../config/env.js';
 
 export async function registerCorePlugins(fastify) {
+  // Generic OPTIONS handler to prevent 404 on preflight requests when CORS is disabled
+    fastify.options('/*', (request, reply) => {
+      reply.code(204).send();
+    });
   const allowedOrigins = String(env.frontendOrigin || '')
     .split(',')
     .map((origin) => origin.trim())
