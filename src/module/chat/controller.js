@@ -11,7 +11,7 @@ const sendSseEvent = (reply, payload) => {
 const parseAllowedOrigins = (value) =>
   String(value || '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
     .filter(Boolean);
 
 const isAllowedOrigin = (origin, allowedOrigins) => {
