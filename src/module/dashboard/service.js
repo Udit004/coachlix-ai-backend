@@ -11,7 +11,7 @@ function toPlainObject(document) {
 
 async function getPrimaryWorkoutPlan(userId) {
   const activePlan = await WorkoutPlan.findOne({ userId, isActive: true })
-    .select('_id name startDate isActive weeks stats')
+    .select('_id name startDate isActive weeks stats totalWorkoutsCount workoutFrequency goal difficulty duration')
     .lean();
 
   if (activePlan) {
@@ -20,7 +20,7 @@ async function getPrimaryWorkoutPlan(userId) {
 
   return WorkoutPlan.findOne({ userId })
     .sort({ createdAt: -1 })
-    .select('_id name startDate isActive weeks stats')
+    .select('_id name startDate isActive weeks stats totalWorkoutsCount workoutFrequency goal difficulty duration')
     .lean();
 }
 

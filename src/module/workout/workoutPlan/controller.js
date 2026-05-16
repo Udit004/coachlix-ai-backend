@@ -10,6 +10,7 @@ import {
   deletePlanByQuery,
   activateWorkoutPlan,
   deactivateWorkoutPlan,
+  generateAiWorkoutPlan,
   cloneWorkoutPlan,
   getWorkoutStats,
   addProgressEntry,
@@ -17,7 +18,17 @@ import {
   updateProgressEntry,
   deleteProgressEntry,
   getProgressEntry,
-  batchUpdateProgressEntries
+  batchUpdateProgressEntries,
+  addWeek,
+  updateWeek,
+  deleteWeek,
+  addWorkoutToDay,
+  deleteWorkoutFromDay,
+  clearDayWorkouts,
+  addExercisesToWorkout,
+  getWorkoutExercises,
+  updateWorkoutExercises,
+  deleteExerciseFromWorkout
 } from './workoutPlanService.js';
 
 function resolveUser(request) {
@@ -110,6 +121,12 @@ export function createWorkoutPlanController() {
       return deactivateWorkoutPlan(userId, request.params.id);
     }),
 
+    generateAiWorkoutPlan: wrap(async (request, reply) => {
+      const userId = resolveUser(request);
+      const result = await generateAiWorkoutPlan(userId, request.body || {});
+      return reply.code(201).send(result);
+    }),
+
     cloneWorkoutPlan: wrap(async (request, reply) => {
       const userId = resolveUser(request);
       const clonedPlan = await cloneWorkoutPlan(userId, request.params.id, request.body?.name);
@@ -150,6 +167,67 @@ export function createWorkoutPlanController() {
     batchUpdateProgressEntries: wrap(async (request) => {
       const userId = resolveUser(request);
       return batchUpdateProgressEntries(userId, request.params.id, request.body?.entries || []);
+    }),
+
+    // Granular management
+    addWeek: wrap(async (request, reply) => {
+      const userId = resolveUser(request);
+      const result = await addWeek(userId, request.params.id, request.body || {});
+      return reply.code(201).send(result);
+    }),
+
+    updateWeek: wrap(async (request) => {
+      const userId = resolveUser(request);
+      return updateWeek(userId, request.params.id, request.params.weekNumber, request.body || {});
+    }),
+
+    deleteWeek: wrap(async (request) => {
+      const userId = resolveUser(request);
+      return deleteWeek(userId, request.params.id, request.params.weekNumber);
+    }),
+
+    addWorkoutToDay: wrap(async (request, reply) => {
+      const userId = resolveUser(request);
+      const { id, weekNumber, dayNumber } = request.params;
+      const result = await addWorkoutToDay(userId, id, weekNumber, dayNumber, request.body || {});
+      return reply.code(201).send(result);
+    }),
+
+    deleteWorkoutFromDay: wrap(async (request) => {
+      const userId = resolveUser(request);
+      const { id, weekNumber, dayNumber, workoutIndex } = request.params;
+      return deleteWorkoutFromDay(userId, id, weekNumber, dayNumber, workoutIndex);
+    }),
+
+    clearDayWorkouts: wrap(async (request) => {
+      const userId = resolveUser(request);
+      const { id, weekNumber, dayNumber } = request.params;
+      return clearDayWorkouts(userId, id, weekNumber, dayNumber);
+    }),
+
+    addExercisesToWorkout: wrap(async (request, reply) => {
+      const userId = resolveUser(request);
+      const { id, weekNumber, dayNumber, workoutIndex } = request.params;
+      const result = await addExercisesToWorkout(userId, id, weekNumber, dayNumber, workoutIndex, request.body || {});
+      return reply.code(201).send(result);
+    }),
+
+    getWorkoutExercises: wrap(async (request) => {
+      const userId = resolveUser(request);
+      const { id, weekNumber, dayNumber, workoutIndex } = request.params;
+      return getWorkoutExercises(userId, id, weekNumber, dayNumber, workoutIndex);
+    }),
+
+    updateWorkoutExercises: wrap(async (request) => {
+      const userId = resolveUser(request);
+      const { id, weekNumber, dayNumber, workoutIndex } = request.params;
+      return updateWorkoutExercises(userId, id, weekNumber, dayNumber, workoutIndex, request.body || {});
+    }),
+
+    deleteExerciseFromWorkout: wrap(async (request) => {
+      const userId = resolveUser(request);
+      const { id, weekNumber, dayNumber, workoutIndex, exerciseIndex } = request.params;
+      return deleteExerciseFromWorkout(userId, id, weekNumber, dayNumber, workoutIndex, exerciseIndex);
     })
   };
 }

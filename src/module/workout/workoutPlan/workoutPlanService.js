@@ -45,6 +45,34 @@ async function getUserPlanOrError(userId, planId) {
   return plan;
 }
 
+function calculatePlanStats(plan) {
+  if (!plan.weeks || plan.weeks.length === 0) {
+    return {
+      totalWorkoutsCount: 0,
+      workoutFrequency: 0
+    };
+  }
+
+  let totalWorkouts = 0;
+  plan.weeks.forEach((week) => {
+    if (week.days) {
+      week.days.forEach((day) => {
+        if (!day.isRestDay && day.workouts && day.workouts.length > 0) {
+          totalWorkouts++;
+        }
+      });
+    }
+  });
+
+  const durationWeeks = plan.duration || plan.weeks.length || 1;
+  const frequency = Math.round((totalWorkouts / durationWeeks) * 10) / 10;
+
+  return {
+    totalWorkoutsCount: totalWorkouts,
+    workoutFrequency: frequency
+  };
+}
+
 export async function listWorkoutPlans(userId, query = {}) {
   const cacheKey = `user:workout-plans-list:${userId}:${query.active || 'all'}:${query.goal || 'all'}:${query.difficulty || 'all'}:${query.sort || 'default'}`;
 
@@ -79,7 +107,7 @@ export async function listWorkoutPlans(userId, query = {}) {
       break;
   }
 
-  let planQuery = WorkoutPlan.find(mongoQuery).sort(sortObj);
+  let planQuery = WorkoutPlan.find(mongoQuery).sort(sortObj).select('-weeks');
   if (query.limit) {
     planQuery = planQuery.limit(Number.parseInt(query.limit, 10));
   }
@@ -150,6 +178,11 @@ export async function createWorkoutPlan(userId, body) {
     createdBy: body.createdBy || 'user'
   });
 
+  // Calculate and set stats
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
   const savedPlan = await plan.save();
 
   await invalidateWorkoutPlanCache(userId);
@@ -167,6 +200,13 @@ export async function updateWorkoutPlan(userId, planId, updateData) {
     ...updateData,
     updatedAt: new Date()
   });
+
+  // Re-calculate stats if weeks or duration changed
+  if (updateData.weeks || updateData.duration) {
+    const stats = calculatePlanStats(plan);
+    plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+    plan.workoutFrequency = stats.workoutFrequency;
+  }
 
   const updatedPlan = await plan.save();
   await invalidateWorkoutPlanCache(userId, planId);
@@ -248,6 +288,81 @@ export async function deactivateWorkoutPlan(userId, planId) {
   };
 }
 
+export async function generateAiWorkoutPlan(userId, body) {
+  const {
+    name,
+    goal,
+    difficulty,
+    duration,
+    equipment,
+    targetMuscleGroups
+  } = body;
+
+  // For now, we'll create a structured plan based on templates.
+  // In a real AI implementation, this would call Gemini or another LLM.
+  const normalizedGoal = normalizeGoal(goal);
+  const planDuration = duration || 4;
+  const planName = name || `My AI ${normalizedGoal} Plan`;
+
+  const weeks = [];
+  for (let w = 1; w <= planDuration; w++) {
+    const days = [];
+    // Typical 3-day split: Push, Pull, Legs
+    const workoutTypes = ['Push', 'Pull', 'Legs'];
+    for (let d = 1; d <= 7; d++) {
+      if (d === 1 || d === 3 || d === 5) {
+        const typeIndex = (d - 1) / 2;
+        days.push({
+          dayNumber: d,
+          workouts: [{
+            name: `${workoutTypes[typeIndex]} Workout`,
+            exercises: [], // Placeholder exercises
+            isCompleted: false
+          }],
+          isCompleted: false
+        });
+      } else {
+        days.push({
+          dayNumber: d,
+          workouts: [],
+          isRestDay: true,
+          isCompleted: false
+        });
+      }
+    }
+    weeks.push({
+      weekNumber: w,
+      days
+    });
+  }
+
+  const plan = new WorkoutPlan({
+    userId,
+    name: planName,
+    goal: normalizedGoal,
+    difficulty: difficulty || 'Beginner',
+    duration: planDuration,
+    weeks,
+    equipment: equipment || [],
+    targetMuscleGroups: targetMuscleGroups || [],
+    isActive: false,
+    createdBy: 'system'
+  });
+
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
+  const savedPlan = await plan.save();
+  await invalidateWorkoutPlanCache(userId);
+
+  return {
+    success: true,
+    plan: savedPlan,
+    message: 'AI workout plan generated successfully (Template based)'
+  };
+}
+
 export async function cloneWorkoutPlan(userId, planId, newName) {
   const originalPlan = await getUserPlanOrError(userId, planId);
 
@@ -275,6 +390,12 @@ export async function cloneWorkoutPlan(userId, planId, newName) {
   };
 
   const clonedPlan = new WorkoutPlan(clonedPlanData);
+  
+  // Calculate and set stats
+  const stats = calculatePlanStats(clonedPlan);
+  clonedPlan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  clonedPlan.workoutFrequency = stats.workoutFrequency;
+
   const savedPlan = await clonedPlan.save();
 
   await invalidateWorkoutPlanCache(userId);
@@ -402,6 +523,270 @@ export async function getWorkoutStats(userId, planId) {
     planId: planId,
     planName: plan.name,
     lastUpdated: new Date().toISOString()
+  };
+}
+
+// Granular workout plan management
+export async function addWeek(userId, planId, weekData) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const weekNumber = weekData.weekNumber || (plan.weeks.length + 1);
+  
+  const newWeek = {
+    weekNumber,
+    days: weekData.days || []
+  };
+
+  plan.weeks.push(newWeek);
+  
+  // Update stats
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Week added successfully',
+    week: newWeek
+  };
+}
+
+export async function updateWeek(userId, planId, weekNumber, weekData) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const weekIndex = plan.weeks.findIndex(w => w.weekNumber === Number(weekNumber));
+
+  if (weekIndex === -1) {
+    const error = new Error(`Week ${weekNumber} not found`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  Object.assign(plan.weeks[weekIndex], weekData);
+  
+  // Update stats
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Week updated successfully',
+    week: plan.weeks[weekIndex]
+  };
+}
+
+export async function deleteWeek(userId, planId, weekNumber) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const weekIndex = plan.weeks.findIndex(w => w.weekNumber === Number(weekNumber));
+
+  if (weekIndex === -1) {
+    const error = new Error(`Week ${weekNumber} not found`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  plan.weeks.splice(weekIndex, 1);
+  
+  // Update stats
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Week deleted successfully'
+  };
+}
+
+export async function addWorkoutToDay(userId, planId, weekNumber, dayNumber, workoutData) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const week = plan.weeks.find(w => w.weekNumber === Number(weekNumber));
+  if (!week) {
+    const error = new Error(`Week ${weekNumber} not found`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  let day = week.days.find(d => d.dayNumber === Number(dayNumber));
+  if (!day) {
+    day = { dayNumber: Number(dayNumber), workouts: [] };
+    week.days.push(day);
+  }
+
+  const newWorkout = {
+    name: workoutData.name || 'New Workout',
+    exercises: workoutData.exercises || [],
+    isCompleted: workoutData.isCompleted || false
+  };
+
+  day.workouts.push(newWorkout);
+  
+  // Update stats
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Workout added successfully',
+    workout: newWorkout
+  };
+}
+
+export async function deleteWorkoutFromDay(userId, planId, weekNumber, dayNumber, workoutIndex) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const week = plan.weeks.find(w => w.weekNumber === Number(weekNumber));
+  if (!week) throw new Error(`Week ${weekNumber} not found`);
+  
+  const day = week.days.find(d => d.dayNumber === Number(dayNumber));
+  if (!day) throw new Error(`Day ${dayNumber} not found`);
+
+  if (!day.workouts || workoutIndex < 0 || workoutIndex >= day.workouts.length) {
+    throw new Error(`Workout at index ${workoutIndex} not found`);
+  }
+
+  day.workouts.splice(workoutIndex, 1);
+  
+  // Update stats
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Workout deleted successfully'
+  };
+}
+
+export async function clearDayWorkouts(userId, planId, weekNumber, dayNumber) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const week = plan.weeks.find(w => w.weekNumber === Number(weekNumber));
+  if (!week) throw new Error(`Week ${weekNumber} not found`);
+  
+  const day = week.days.find(d => d.dayNumber === Number(dayNumber));
+  if (day) {
+    day.workouts = [];
+  }
+  
+  // Update stats
+  const stats = calculatePlanStats(plan);
+  plan.totalWorkoutsCount = stats.totalWorkoutsCount;
+  plan.workoutFrequency = stats.workoutFrequency;
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Day workouts cleared successfully'
+  };
+}
+
+export async function addExercisesToWorkout(userId, planId, weekNumber, dayNumber, workoutIndex, exerciseData) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const week = plan.weeks.find(w => w.weekNumber === Number(weekNumber));
+  const day = week?.days.find(d => d.dayNumber === Number(dayNumber));
+  const workout = day?.workouts[Number(workoutIndex)];
+
+  if (!workout) {
+    const error = new Error('Workout not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const newExercises = Array.isArray(exerciseData.exercises) ? exerciseData.exercises : [exerciseData];
+  workout.exercises = [...(workout.exercises || []), ...newExercises];
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Exercises added successfully',
+    exercises: workout.exercises
+  };
+}
+
+export async function getWorkoutExercises(userId, planId, weekNumber, dayNumber, workoutIndex) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const week = plan.weeks.find(w => w.weekNumber === Number(weekNumber));
+  const day = week?.days.find(d => d.dayNumber === Number(dayNumber));
+  const workout = day?.workouts[Number(workoutIndex)];
+
+  if (!workout) {
+    const error = new Error('Workout not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return {
+    success: true,
+    exercises: workout.exercises || []
+  };
+}
+
+export async function updateWorkoutExercises(userId, planId, weekNumber, dayNumber, workoutIndex, exerciseData) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const week = plan.weeks.find(w => w.weekNumber === Number(weekNumber));
+  const day = week?.days.find(d => d.dayNumber === Number(dayNumber));
+  const workout = day?.workouts[Number(workoutIndex)];
+
+  if (!workout) {
+    const error = new Error('Workout not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (exerciseData.action === 'reorder' || exerciseData.action === 'update') {
+    workout.exercises = exerciseData.exercises;
+  } else {
+    workout.exercises = exerciseData.exercises || workout.exercises;
+  }
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Exercises updated successfully',
+    exercises: workout.exercises
+  };
+}
+
+export async function deleteExerciseFromWorkout(userId, planId, weekNumber, dayNumber, workoutIndex, exerciseIndex) {
+  const plan = await getUserPlanOrError(userId, planId);
+  const week = plan.weeks.find(w => w.weekNumber === Number(weekNumber));
+  const day = week?.days.find(d => d.dayNumber === Number(dayNumber));
+  const workout = day?.workouts[Number(workoutIndex)];
+
+  if (!workout || !workout.exercises || exerciseIndex < 0 || exerciseIndex >= workout.exercises.length) {
+    const error = new Error('Exercise not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  workout.exercises.splice(exerciseIndex, 1);
+
+  await plan.save();
+  await invalidateWorkoutPlanCache(userId, planId);
+
+  return {
+    success: true,
+    message: 'Exercise deleted successfully'
   };
 }
 
