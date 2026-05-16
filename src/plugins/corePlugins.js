@@ -7,10 +7,6 @@ import websocket from '@fastify/websocket';
 import { env } from '../config/env.js';
 
 export async function registerCorePlugins(fastify) {
-  // Generic OPTIONS handler to prevent 404 on preflight requests when CORS is disabled
-    fastify.options('/*', (request, reply) => {
-      reply.code(204).send();
-    });
   const allowedOrigins = String(env.frontendOrigin || '')
     .split(',')
     .map((origin) => origin.trim())
@@ -24,20 +20,28 @@ export async function registerCorePlugins(fastify) {
     contentSecurityPolicy: false
   });
 
-  // await fastify.register(cors, {
-  //   origin: (origin, cb) => {
-  //     if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-  //       cb(null, true);
-  //       return;
-  //     }
-  //
-  //     cb(new Error(`Origin ${origin} is not allowed by CORS`), false);
-  //   },
-  //   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  //   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
-  //   exposedHeaders: ['Content-Type', 'Cache-Control'],
-  //   credentials: true
-  // });
+  // Hardcoded CORS for testing (localhost + deployed frontend)
+  const hardcodedOrigins = [
+    'http://localhost:3000',
+    'https://coachlix-ai.vercel.app'
+  ];
+
+  console.log('Allowed Origins (hardcoded):', hardcodedOrigins);
+
+  await fastify.register(cors, {
+    origin: (origin, cb) => {
+      if (!origin || hardcodedOrigins.includes(origin)) {
+        cb(null, true);
+        return;
+      }
+
+      cb(new Error(`Origin ${origin} is not allowed by CORS`), false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
+    exposedHeaders: ['Content-Type', 'Cache-Control'],
+    credentials: true
+  });
 
   await fastify.register(multipart, {
     limits: {
