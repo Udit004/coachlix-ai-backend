@@ -48,6 +48,14 @@ const ChatSessionSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true
+    },
+    isPinned: {
+      type: Boolean,
+      default: false
+    },
+    isArchived: {
+      type: Boolean,
+      default: false
     }
   },
   {
