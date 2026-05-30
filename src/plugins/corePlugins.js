@@ -34,7 +34,8 @@ export async function registerCorePlugins(fastify) {
   // Hardcoded CORS for testing (localhost + deployed frontend)
   const hardcodedOrigins = [
     'http://localhost:3000',
-    'https://coachlix-ai.vercel.app'
+    'https://coachlix-ai.vercel.app',
+    'https://pritikakumari.vercel.app'
   ];
 
   console.log('Allowed Origins (hardcoded):', hardcodedOrigins);
