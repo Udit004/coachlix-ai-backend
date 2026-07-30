@@ -3,16 +3,29 @@ import { GoogleGenAI } from '@google/genai';
 import { env } from '../config/env.js';
 import { traceLiveEvent } from './langchainTracing.js';
 
-function extractTextFromParts(parts) {
+function extractTextAndThoughtsFromParts(parts) {
   if (!Array.isArray(parts)) {
-    return null;
+    return { text: null, thought: null };
   }
 
-  const textChunks = parts
-    .map((part) => part?.text || part?.inlineText || part?.inline_text)
-    .filter((value) => typeof value === 'string' && value.length > 0);
+  const textChunks = [];
+  const thoughtChunks = [];
 
-  return textChunks.length ? textChunks.join(' ') : null;
+  for (const part of parts) {
+    const text = part?.text || part?.inlineText || part?.inline_text;
+    if (typeof text === 'string' && text.length > 0) {
+      if (part?.thought) {
+        thoughtChunks.push(text);
+      } else {
+        textChunks.push(text);
+      }
+    }
+  }
+
+  return {
+    text: textChunks.length ? textChunks.join(' ') : null,
+    thought: thoughtChunks.length ? thoughtChunks.join(' ') : null
+  };
 }
 
 function extractInlineAudio(parts) {
@@ -43,11 +56,11 @@ function normalizeResponseModalities(modalities) {
     .map((value) => String(value || '').toUpperCase())
     .filter((value) => value === 'AUDIO' || value === 'TEXT');
 
-  if (allowed.includes('AUDIO')) {
+  if (allowed.length === 0) {
     return ['AUDIO'];
   }
 
-  return allowed.length > 0 ? [allowed[0]] : ['AUDIO'];
+  return allowed;
 }
 
 export class GeminiLiveBridge {
@@ -166,12 +179,14 @@ export class GeminiLiveBridge {
       dataPayload?.model_turn;
 
     const parts = modelTurn?.parts || [];
+    console.log("GEMINI LIVE PARTS:", JSON.stringify(parts, null, 2));
 
-    const text = extractTextFromParts(parts);
-    if (text) {
+    const extracted = extractTextAndThoughtsFromParts(parts);
+    if (extracted.text || extracted.thought) {
       this.onServerEvent({
         type: 'gemini_text',
-        text
+        text: extracted.text,
+        thought: extracted.thought
       });
     }
 
@@ -198,7 +213,7 @@ export class GeminiLiveBridge {
 
     await traceLiveEvent('gemini_live_message', {
       clientId: this.clientId,
-      hasText: Boolean(text),
+      hasText: Boolean(extracted.text) || Boolean(extracted.thought),
       hasAudio: Boolean(audio),
       turnComplete
     });
@@ -214,7 +229,7 @@ export class GeminiLiveBridge {
     this.ensureConnected();
 
     await this.session.sendRealtimeInput({
-      media: {
+      audio: {
         data: audioBase64,
         mimeType: mimeType || env.audioInputMimeType
       }

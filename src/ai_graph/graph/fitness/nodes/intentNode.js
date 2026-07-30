@@ -15,16 +15,19 @@ Step 1: Classify the user's intent into:
 - GREETING
 - GENERAL_QUERY
 - PERSONALIZED_QUERY
+- OFF_TOPIC
 
 Step 2:
 - If GREETING -> respond naturally
 - If GENERAL_QUERY -> answer normally
 - If PERSONALIZED_QUERY -> DO NOT answer, instead mark needs_rag = true
+- If OFF_TOPIC -> mark intent = OFF_TOPIC and provide a polite refusal in 'response'
 
 ---
 
 RULES:
 - If unsure -> GENERAL_QUERY
+- OFF_TOPIC includes anything NOT related to fitness, health, nutrition, workout, or the Coachlix platform. Examples: coding, python, history, politics, general math (unless fitness related), etc.
 - Do NOT hallucinate user data
 - Keep responses concise and helpful
 
@@ -94,7 +97,8 @@ function parseClassifierOutput(raw) {
     const intent =
       normalizedIntent === "GREETING" ||
       normalizedIntent === "GENERAL_QUERY" ||
-      normalizedIntent === "PERSONALIZED_QUERY"
+      normalizedIntent === "PERSONALIZED_QUERY" ||
+      normalizedIntent === "OFF_TOPIC"
         ? normalizedIntent
         : "GENERAL_QUERY";
 
@@ -124,7 +128,7 @@ function buildDataNeeds(intentName, originalMessage, directAnswerable = false) {
     lower
   );
 
-  if (intentName === "greeting") {
+  if (intentName === "greeting" || intentName === "off_topic") {
     return {
       needsProfile: false,
       needsDiet: false,
@@ -158,7 +162,10 @@ function buildDataNeeds(intentName, originalMessage, directAnswerable = false) {
 
 async function classifyWithSmallLlm(originalMessage) {
   const classifierLlm = createStreamingLLM(false, {
-    model: process.env.INTENT_CLASSIFIER_MODEL?.trim() || LLM_CONFIG.model,
+    model:
+      process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
+      process.env.GENERAL_QUERY_MODEL?.trim() ||
+      "gemini-2.5-flash-lite",
     temperature: 0,
     maxOutputTokens: 180,
     topP: 0.1,
@@ -285,14 +292,18 @@ export async function intentNode(state) {
       ? "greeting"
       : classifierResult.intent === "PERSONALIZED_QUERY"
         ? "question_specific"
-        : "question_general";
+        : classifierResult.intent === "OFF_TOPIC"
+          ? "off_topic"
+          : "question_general";
 
   const queryType =
     classifierResult.intent === "GREETING"
       ? QueryType.GREETING
       : classifierResult.intent === "PERSONALIZED_QUERY"
         ? QueryType.PERSONALIZED_FITNESS
-        : QueryType.GENERAL_FITNESS;
+        : classifierResult.intent === "OFF_TOPIC"
+          ? QueryType.OFF_TOPIC
+          : QueryType.GENERAL_FITNESS;
 
   const intent = {
     intent: intentName,
@@ -335,7 +346,9 @@ export async function intentNode(state) {
     queryType,
     needsRag: classifierResult.needs_rag,
     greetingResponse:
-      classifierResult.intent === "GREETING" ? classifierResult.response : "",
+      classifierResult.intent === "GREETING" || classifierResult.intent === "OFF_TOPIC"
+        ? classifierResult.response
+        : "",
     enableSearch,
     flowMetrics: { intentClassificationTime: Date.now() - t0 },
   };

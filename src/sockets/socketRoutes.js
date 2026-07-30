@@ -88,8 +88,9 @@ async function ensureChatSession({ userId, chatId, plan, title }) {
   return created;
 }
 
-async function appendMessage(chatId, role, content) {
+async function appendMessage(chatId, role, content, thought = null) {
   const trimmed = String(content || '').trim();
+  const trimmedThought = thought ? String(thought).trim() : null;
   if (!chatId || !trimmed) {
     return null;
   }
@@ -101,6 +102,7 @@ async function appendMessage(chatId, role, content) {
         messages: {
           role,
           content: trimmed,
+          ...(trimmedThought ? { thoughtContent: trimmedThought } : {}),
           timestamp: new Date()
         }
       },
@@ -124,20 +126,24 @@ export async function socketRoutes(fastify) {
     let activeChatId = null;
     let activePlan = 'general';
     let pendingAiText = '';
+    let pendingAiThought = '';
 
     const flushPendingAiText = async () => {
-      if (!pendingAiText.trim()) {
+      if (!pendingAiText.trim() && !pendingAiThought.trim()) {
         return;
       }
 
       const textToPersist = pendingAiText;
+      const thoughtToPersist = pendingAiThought;
       pendingAiText = '';
-      await appendMessage(activeChatId, 'ai', textToPersist);
+      pendingAiThought = '';
+      await appendMessage(activeChatId, 'ai', textToPersist, thoughtToPersist);
     };
 
     const handleGeminiServerEvent = async (eventPayload) => {
-      if (eventPayload?.type === 'gemini_text' && eventPayload.text) {
-        pendingAiText += eventPayload.text;
+      if (eventPayload?.type === 'gemini_text') {
+        if (eventPayload.text) pendingAiText += eventPayload.text;
+        if (eventPayload.thought) pendingAiThought += eventPayload.thought;
       }
 
       if (eventPayload?.type === 'gemini_turn_complete') {

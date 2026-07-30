@@ -6,7 +6,7 @@ import { QueryType } from "../../reasoning/intentRouter.js";
 export function routeAfterClassify(state) {
   const { queryType, intent } = state;
 
-  if (queryType === QueryType.GREETING) {
+  if (queryType === QueryType.GREETING || queryType === QueryType.OFF_TOPIC) {
     console.log(
       `[Graph:route] classify -> greeting (instant response - intent: ${intent?.intent})`
     );

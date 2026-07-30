@@ -19,6 +19,7 @@ export const QueryType = {
   GREETING: "GREETING",
   GENERAL_FITNESS: "GENERAL_FITNESS",
   PERSONALIZED_FITNESS: "PERSONALIZED_FITNESS",
+  OFF_TOPIC: "OFF_TOPIC",
 };
 
 // ─── Greeting detection ────────────────────────────────────────────────────────
@@ -191,6 +192,10 @@ export function detectIntent(message, classifiedIntent = null) {
     }
 
     // motivation / complaint / feedback / question_general / trend_query → general
+    if (v2Intent === "off_topic") {
+      return { queryType: QueryType.OFF_TOPIC };
+    }
+
     return { queryType: QueryType.GENERAL_FITNESS };
   }
 
@@ -201,6 +206,17 @@ export function detectIntent(message, classifiedIntent = null) {
       queryType: QueryType.GREETING,
       templateResponse: getGreetingResponse(trimmed),
     };
+  }
+
+  // ── 2.1 Off-topic pattern check (coding, etc.) ──────────────────────────
+  const offTopicPatterns = [
+    /\b(python|javascript|coding|programming|code|java|c\+\+|html|css|sql)\b/i,
+    /\b(weather|politics|news|history|celebrity|movie|song)\b/i,
+  ];
+  if (offTopicPatterns.some((re) => re.test(trimmed))) {
+    // Note: This is a weak check, the LLM classifier is the source of truth.
+    // We only use this if no V2 result is available and it's highly likely off-topic.
+    // However, some words like "water" (history) might clash, so we are conservative.
   }
 
   // ── 3. Keyword heuristic for personalized queries ─────────────────────────
