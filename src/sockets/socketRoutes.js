@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import { GeminiLiveBridge } from '../ai/geminiLiveBridge.js';
 import { env } from '../config/env.js';
 import ChatSession from '../models/ChatSession.js';
+import User from '../models/User.js';
 
 const clients = new Map();
 
@@ -233,6 +234,7 @@ export async function socketRoutes(fastify) {
             liveBridge = new GeminiLiveBridge({
               fastify,
               clientId,
+              userId,
               onServerEvent: (eventPayload) => {
                 safeSend(socket, eventPayload);
 
@@ -248,9 +250,33 @@ export async function socketRoutes(fastify) {
             });
           }
 
+          let userProfile = null;
+          try {
+            if (userId && !userId.startsWith('anon:')) {
+              userProfile = await User.findOne({ firebaseUid: userId }).lean();
+            }
+          } catch (err) {
+            fastify.log.error({ err, userId }, 'Failed to fetch user profile for live session memory');
+          }
+
+          let memoryContext = '';
+          if (userProfile) {
+            memoryContext += `\nUser Profile:\nName: ${userProfile.name || 'Unknown'}\nGoals: ${userProfile.fitnessGoal || 'Unknown'}\nExperience: ${userProfile.experience || 'Unknown'}\nAge: ${userProfile.age || 'Unknown'}, Weight: ${userProfile.weight || 'Unknown'}, Target Weight: ${userProfile.targetWeight || 'Unknown'}\n`;
+          }
+
+          if (chatSession && Array.isArray(chatSession.messages) && chatSession.messages.length > 0) {
+            const recentMessages = chatSession.messages.slice(-15).map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${m.content}`).join('\n');
+            memoryContext += `\nRecent Conversation History:\n${recentMessages}\n`;
+          }
+
+          const baseInstruction = parsed.systemInstruction || env.liveSystemInstruction || '';
+          const finalSystemInstruction = memoryContext 
+            ? `${baseInstruction}\n\n--- CONTEXT ---\n${memoryContext}\nUse this context to remember the user's details and continue the conversation naturally. Do not explicitly state that you are reading from context, just act as if you remember them.` 
+            : baseInstruction;
+
           try {
             await liveBridge.connect({
-              systemInstruction: parsed.systemInstruction,
+              systemInstruction: finalSystemInstruction,
               voiceName: parsed.voiceName,
               responseModalities: parsed.responseModalities
             });

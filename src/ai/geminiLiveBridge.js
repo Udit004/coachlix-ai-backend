@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 
 import { env } from '../config/env.js';
 import { traceLiveEvent } from './langchainTracing.js';
+import { liveToolsConfig, executeLiveTool } from './liveTools.js';
 
 function extractTextAndThoughtsFromParts(parts) {
   if (!Array.isArray(parts)) {
@@ -64,13 +65,14 @@ function normalizeResponseModalities(modalities) {
 }
 
 export class GeminiLiveBridge {
-  constructor({ fastify, clientId, onServerEvent }) {
+  constructor({ fastify, clientId, userId, onServerEvent }) {
     if (!env.geminiApiKey) {
       throw new Error('GEMINI_API_KEY is required for live voice mode');
     }
 
     this.fastify = fastify;
     this.clientId = clientId;
+    this.userId = userId;
     this.onServerEvent = onServerEvent;
     this.ai = new GoogleGenAI({
       apiKey: env.geminiApiKey,
@@ -87,7 +89,8 @@ export class GeminiLiveBridge {
 
     const liveConfig = {
       responseModalities: normalizedModalities,
-      systemInstruction: systemInstruction || env.liveSystemInstruction
+      systemInstruction: systemInstruction || env.liveSystemInstruction,
+      tools: liveToolsConfig
     };
 
     if (normalizedModalities.includes('AUDIO')) {
@@ -209,6 +212,47 @@ export class GeminiLiveBridge {
 
     if (turnComplete) {
       this.onServerEvent({ type: 'gemini_turn_complete' });
+    }
+
+    const functionCalls = parts
+      .filter((p) => p.functionCall || p.function_call)
+      .map((p) => p.functionCall || p.function_call);
+
+    if (functionCalls.length > 0) {
+      // Execute all tool calls asynchronously
+      const responses = await Promise.all(
+        functionCalls.map(async (call) => {
+          const result = await executeLiveTool(call.name, call.args || {}, this.userId);
+          
+          this.onServerEvent({
+            type: 'gemini_tool_call',
+            tool: call.name,
+            result: result
+          });
+
+          // Fallback to ensuring result is an object for Gemini compatibility
+          const responsePayload = typeof result === 'object' ? result : { result: String(result) };
+
+          return {
+            functionResponse: {
+              id: call.id,
+              name: call.name,
+              response: responsePayload
+            }
+          };
+        })
+      );
+
+      // Send the tool results back to the model immediately
+      await this.session.sendClientContent({
+        turns: [
+          {
+            role: 'user', // For genai SDK, tool responses are generally provided as user turns containing functionResponses, or just as parts
+            parts: responses
+          }
+        ],
+        turnComplete: true // Turn is now complete from the tool perspective, handing it back to the model
+      });
     }
 
     await traceLiveEvent('gemini_live_message', {
