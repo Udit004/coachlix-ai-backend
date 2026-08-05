@@ -2,6 +2,7 @@ import { buildServer } from './app.js';
 import { env } from './config/env.js';
 import { connectMongo, disconnectMongo } from './db/mongo.js';
 import { setupAIModule } from './services/aiIntegration.js';
+import { initializeEventBus, closeEventBus } from './services/eventBus.js';
 
 const start = async () => {
   const fastify = await buildServer();
@@ -9,6 +10,7 @@ const start = async () => {
   try {
     await connectMongo();
     await setupAIModule(env.geminiApiKey);
+    await initializeEventBus(fastify);
 
     await fastify.listen({
       host: env.host,
@@ -21,6 +23,7 @@ const start = async () => {
 
     const shutdown = async (signal) => {
       fastify.log.info({ signal }, 'Graceful shutdown started');
+      await closeEventBus();
       await fastify.close();
       await disconnectMongo();
       process.exit(0);

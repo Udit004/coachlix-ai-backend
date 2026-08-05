@@ -2,6 +2,8 @@ import ChatSession from '../../models/ChatSession.js';
 import User from '../../models/User.js';
 import { redis } from '../../shared/cache.js';
 import { processAiChat } from '../../ai_graph/index.js';
+import { emitAiEvent } from '../../services/eventBus.js';
+import { memoryService } from '../../services/memoryService.js';
 
 async function getConversationHistory(chatId) {
   if (!chatId) {
@@ -63,12 +65,44 @@ export const chatService = {
       throw new Error('Message and userId are required');
     }
 
+    let sessionId = chatId;
+    if (!sessionId) {
+      const session = await ChatSession.create({
+        userId,
+        title: 'New Chat',
+        plan,
+        messages: [],
+      });
+      sessionId = session._id.toString();
+    }
+
     const [conversationHistory, profile] = await Promise.all([
-      getConversationHistory(chatId),
+      memoryService.buildConversationHistory(userId, sessionId),
       getUserProfile(userId),
     ]);
 
-    const sessionId = chatId || `chat_${userId}_${Date.now()}`;
+    await emitAiEvent('chat.message.received', {
+      userId,
+      sessionId,
+      plan,
+      hasFiles: Array.isArray(files) && files.length > 0,
+      messagePreview: String(message).slice(0, 120),
+    });
+
+    await memoryService.appendUserMessage(userId, sessionId, message);
+    await emitAiEvent('memory.short_term.updated', {
+      userId,
+      sessionId,
+      role: 'user',
+    });
+
+    await emitAiEvent('ai.model.requested', {
+      userId,
+      sessionId,
+      plan,
+      conversationHistoryCount: conversationHistory.length,
+    });
+
     const result = await processAiChat(
       {
         message,
@@ -76,10 +110,36 @@ export const chatService = {
         userId,
         plan,
         profile,
-        conversationHistory,
+        conversationHistory: await memoryService.buildConversationHistory(userId, sessionId),
+        sessionId,
       },
       onChunk
     );
+
+    const assistantResponse = String(result.response || '').trim();
+    if (assistantResponse) {
+      await memoryService.appendAssistantMessage(userId, sessionId, assistantResponse);
+    }
+
+    await memoryService.persistTurn(userId, sessionId, 'user', message);
+    if (assistantResponse) {
+      await memoryService.persistTurn(userId, sessionId, 'ai', assistantResponse);
+    }
+
+    await emitAiEvent('ai.response.generated', {
+      userId,
+      sessionId,
+      intent: result.metadata?.intent || null,
+      responseLength: assistantResponse.length,
+      toolsUsed: result.metadata?.toolsUsed || [],
+    });
+
+    await emitAiEvent('ai.model.completed', {
+      userId,
+      sessionId,
+      responseLength: assistantResponse.length,
+      timeTaken: result.metadata?.timeTaken || null,
+    });
 
     return {
       ...result,

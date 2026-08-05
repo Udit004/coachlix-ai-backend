@@ -12,6 +12,7 @@ import {
   getFilesSummary,
 } from "../multimodal/contentBuilder.js";
 import { getContextStats } from "../search/semanticMemoryRetrieval.js";
+import { emitAiEvent } from "../../services/eventBus.js";
 
 function projectProfileForClassification(profile) {
   if (!profile || typeof profile !== "object") return null;
@@ -85,6 +86,13 @@ export async function processChatWithGraph(params, onChunk) {
     flowMetrics: {},
   };
 
+  await emitAiEvent("ai.reasoning.started", {
+    userId,
+    plan,
+    messagePreview: message.slice(0, 120),
+    hasFiles: filesSummary.count > 0,
+  });
+
   let fullResponse = "";
   let lastWord = "";
   let toolsUsed = [];
@@ -104,6 +112,12 @@ export async function processChatWithGraph(params, onChunk) {
         const chunk = data?.chunk;
         const text = extractChunkText(chunk);
         if (text) {
+          await emitAiEvent("ai.model.token.streamed", {
+            userId,
+            plan,
+            chunkLength: text.length,
+            partialLength: fullResponse.length + text.length,
+          });
           fullResponse += text;
           lastWord = await streamTextToFrontend(text, fullResponse, onChunk);
         }
@@ -175,6 +189,13 @@ export async function processChatWithGraph(params, onChunk) {
 
     await sendCompletionSignal(onChunk, fullResponse, lastWord || "done");
 
+    await emitAiEvent("ai.reasoning.completed", {
+      userId,
+      plan,
+      responseLength: fullResponse.length,
+      toolsUsed,
+    });
+
     const totalTime = Date.now() - startTime;
 
     console.log("\n" + "=".repeat(80));
@@ -236,6 +257,12 @@ export async function processChatWithGraph(params, onChunk) {
     };
   } catch (error) {
     console.error("[Graph] Pipeline error:", error);
+
+    await emitAiEvent("ai.tool.failed", {
+      userId,
+      plan,
+      error: error.message,
+    });
 
     try {
       await sendCompletionSignal(onChunk, fullResponse, lastWord || "error");

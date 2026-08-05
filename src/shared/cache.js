@@ -84,3 +84,7 @@ export const redis = {
     return client.keys(pattern);
   }
 };
+
+export function hasRedisRestClient() {
+  return Boolean(getRedisClient());
+}

@@ -10,6 +10,7 @@ import {
   injectRelevantProfileFields,
   shouldSkipHistory,
 } from "../policies.js";
+import { emitAiEvent } from "../../../../services/eventBus.js";
 
 export async function buildPromptNode(state) {
   const {
@@ -59,6 +60,14 @@ export async function buildPromptNode(state) {
 
   const messages = buildInitialMessages(systemPrompt, filteredHistory, userContent);
   console.log(`[Graph:prompt] ${messages.length} messages assembled`);
+
+  await emitAiEvent("ai.prompt.built", {
+    userId,
+    intent: intent?.intent || null,
+    promptTier,
+    messageCount: messages.length,
+    historyCount: filteredHistory.length,
+  });
 
   return { messages, userContext: contextWithProfile ?? promptUserContext };
 }

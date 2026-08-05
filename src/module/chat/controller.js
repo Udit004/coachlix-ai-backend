@@ -117,10 +117,10 @@ export const createChatController = () => ({
       const result = await chatService.streamMessage(
         request.user.uid,
         { message, plan, chatId, files },
-        async ({ text, partialResponse }) => {
+        async ({ word, text, partialResponse }) => {
           sendSseEvent(reply, {
             type: 'word',
-            word: text,
+            word: word ?? text ?? '',
             partialResponse,
             isComplete: false,
           });
