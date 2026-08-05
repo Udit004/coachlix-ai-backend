@@ -27,6 +27,20 @@ export const env = {
   bullmqEnabled: toBoolean(process.env.BULLMQ_ENABLED, true),
   memoryShortTermTurns: toNumber(process.env.MEMORY_SHORT_TERM_TURNS, 12),
   memoryShortTermTtlSeconds: toNumber(process.env.MEMORY_SHORT_TERM_TTL_SECONDS, 60 * 60 * 24 * 7),
+
+  // ── Long-Term Memory (Pinecone + Redis + MongoDB) ──────────────────────
+  usePinecone: toBoolean(process.env.USE_PINECONE, false),
+  pineconeApiKey: process.env.PINECONE_API_KEY || '',
+  pineconeIndexName: process.env.PINECONE_INDEX_NAME || 'coachlix-fitness',
+  pineconeMemoryNamespace: process.env.PINECONE_MEMORY_NAMESPACE || 'memory',
+  pineconeEmbeddingModel: process.env.PINECONE_EMBEDDING_MODEL || 'text-embedding-004',
+  memoryVectorTopK: toNumber(process.env.MEMORY_VECTOR_TOP_K, 5),
+  memoryPromotionThreshold: toNumber(process.env.MEMORY_PROMOTION_THRESHOLD, 3),
+  memorySummaryThreshold: toNumber(process.env.MEMORY_SUMMARY_THRESHOLD, 8),
+  memoryProfileTtlSeconds: toNumber(process.env.MEMORY_PROFILE_TTL_SECONDS, 60 * 60),
+  memoryHotCacheTtlSeconds: toNumber(process.env.MEMORY_HOT_CACHE_TTL_SECONDS, 60 * 30),
+  geminiSummarizerModel: process.env.GEMINI_SUMMARIZER_MODEL || 'gemini-2.5-flash-lite',
+
   firebaseAdminProjectId: process.env.FIREBASE_ADMIN_PROJECT_ID || '',
   firebaseAdminPrivateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY || '',
   firebaseAdminClientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL || '',

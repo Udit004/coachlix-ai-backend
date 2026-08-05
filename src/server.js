@@ -3,6 +3,8 @@ import { env } from './config/env.js';
 import { connectMongo, disconnectMongo } from './db/mongo.js';
 import { setupAIModule } from './services/aiIntegration.js';
 import { initializeEventBus, closeEventBus } from './services/eventBus.js';
+import { registerMemoryPromotionPipeline } from './services/memoryPromotionPipeline.js';
+import { registerSummarizeWorker } from './services/summarizeWorker.js';
 
 const start = async () => {
   const fastify = await buildServer();
@@ -11,6 +13,11 @@ const start = async () => {
     await connectMongo();
     await setupAIModule(env.geminiApiKey);
     await initializeEventBus(fastify);
+
+    // Register background memory workers (off the hot request path).
+    registerMemoryPromotionPipeline();
+    registerSummarizeWorker();
+    fastify.log.info('Long-term memory workers registered (promotion + summarizer)');
 
     await fastify.listen({
       host: env.host,

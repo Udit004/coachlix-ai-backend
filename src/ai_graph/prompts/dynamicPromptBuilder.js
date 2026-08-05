@@ -57,6 +57,13 @@ USER ID: ${userId}`,
     }
   },
 
+LONG_TERM_MEMORY: (userContext) => {
+    const text = userContext?.longTermMemoryText;
+    if (!text || !text.trim()) return '';
+
+    return `\n\n🧠 LONG-TERM MEMORY (what I know about this user from past conversations):\n${text}`;
+  },
+
   ACTIVE_PLANS: (userContext) => {
     let section = '';
     
@@ -249,6 +256,11 @@ export function buildDynamicSystemPrompt(intent, userContext, userId, reasoning 
     sections.push(PROMPT_SECTIONS.CULTURAL_CONTEXT(safeUserContext));
   }
   
+// Include long-term memory if available (cross-session durable recall)
+  if (safeUserContext.longTermMemoryText && safeUserContext.longTermMemoryText.trim()) {
+    sections.push(PROMPT_SECTIONS.LONG_TERM_MEMORY(safeUserContext));
+  }
+
   // Include active plans if user has them (for plan-related queries)
   if (intent.category === 'diet_plan' || intent.category === 'workout_plan' ||
       safeUserContext.dietPlan || safeUserContext.workoutPlan) {

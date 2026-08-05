@@ -33,12 +33,16 @@ export const GraphState = Annotation.Root({
   conversationHistory: Annotation({ reducer: lastWrite, default: () => [] }),
   profile: Annotation({ reducer: lastWrite, default: () => null }),
 
-intent: Annotation({ reducer: lastWrite, default: () => null }),
+  intent: Annotation({ reducer: lastWrite, default: () => null }),
   queryType: Annotation({ reducer: lastWrite, default: () => null }),
   needsRag: Annotation({ reducer: lastWrite, default: () => false }),
   greetingResponse: Annotation({ reducer: lastWrite, default: () => "" }),
   userContext: Annotation({ reducer: lastWrite, default: () => null }),
   enableSearch: Annotation({ reducer: lastWrite, default: () => false }),
+
+  // Long-term (cross-session) memory injected during context retrieval.
+  longTermMemory: Annotation({ reducer: lastWrite, default: () => null }),
+  memoryHits: Annotation({ reducer: lastWrite, default: () => [] }),
 
   toolsUsed: Annotation({ reducer: appendArray, default: () => [] }),
   startTime: Annotation({ reducer: lastWrite, default: () => 0 }),

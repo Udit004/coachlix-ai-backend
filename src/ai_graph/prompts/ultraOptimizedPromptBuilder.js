@@ -301,6 +301,12 @@ export function buildUltraOptimizedPrompt(intent, userContext, userId) {
   // Get the ultra-minimal prompt for this intent
   const promptBuilder = ULTRA_MINIMAL_PROMPTS[intentType] || ULTRA_MINIMAL_PROMPTS.question_general;
   let prompt = promptBuilder(userContext);
+
+  // Inject long-term memory (cross-session durable recall) when available.
+  const memoryText = userContext?.longTermMemoryText;
+  if (memoryText && memoryText.trim()) {
+    prompt += `\n\n🧠 LONG-TERM MEMORY (what I know about this user from past conversations):\n${memoryText}`;
+  }
   
   // Add user ID (always needed)
   prompt += `\n\nUSER_ID: ${userId}`;

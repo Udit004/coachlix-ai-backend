@@ -3,6 +3,11 @@
 import { buildSmartContext } from "../../../search/semanticMemoryRetrieval.js";
 import { fetchNutritionFromUSDA } from "../../../tools/nutritionTool.js";
 import { shouldSkipRag } from "../policies.js";
+import {
+  retrieveMemory,
+  getUserMemoryProfile,
+  formatMemoryForContext,
+} from "../../../../services/longTermMemoryService.js";
 
 const emitEvent = (state, type, payload) => {
   if (typeof state?.onEvent === "function") {
@@ -13,6 +18,29 @@ const emitEvent = (state, type, payload) => {
     }
   }
 };
+
+/**
+ * Fetch long-term memory (vector recall + durable facts) for the current user
+ * and attach it to the user context so it can be injected into the prompt.
+ */
+async function buildLongTermMemory(userId, query) {
+  if (!userId) {
+    return { memoryProfile: null, recalled: { results: [], source: "none" }, text: "" };
+  }
+
+  try {
+    const [memoryProfile, recalled] = await Promise.all([
+      getUserMemoryProfile(userId),
+      retrieveMemory(userId, query),
+    ]);
+
+    const text = formatMemoryForContext(memoryProfile, recalled);
+    return { memoryProfile, recalled, text };
+  } catch (error) {
+    console.error("[Graph:context] Long-term memory retrieval failed:", error?.message || error);
+    return { memoryProfile: null, recalled: { results: [], source: "none" }, text: "" };
+  }
+}
 
 export async function retrieveContextNode(state) {
   const { userId, originalMessage, intent } = state;
@@ -35,11 +63,13 @@ export async function retrieveContextNode(state) {
         workoutPlan: null,
         conversationHistory: [],
       },
+      longTermMemory: { text: "", source: "none" },
+      memoryHits: [],
       flowMetrics: { contextRetrievalTime: 0 },
     };
   }
 
-  console.log("[Graph:context] Retrieving smart context (RAG + MongoDB)...");
+  console.log("[Graph:context] Retrieving smart context (RAG + MongoDB + long-term memory)...");
 
   const foodsToFetch =
     intent.intent === "plan_modification" &&
@@ -54,7 +84,7 @@ export async function retrieveContextNode(state) {
     );
   }
 
-  const [userContext, nutritionResults] = await Promise.all([
+  const [userContext, nutritionResults, longTerm] = await Promise.all([
     buildSmartContext(userId, originalMessage, intent),
     Promise.all(
       foodsToFetch.map(async (food) => {
@@ -62,6 +92,7 @@ export async function retrieveContextNode(state) {
         return data ? { food, ...data } : null;
       })
     ),
+    buildLongTermMemory(userId, originalMessage),
   ]);
 
   const fetched = nutritionResults.filter(Boolean);
@@ -76,8 +107,29 @@ export async function retrieveContextNode(state) {
     );
   }
 
+  // Attach long-term memory to the user context for prompt injection.
+  userContext.longTermMemoryText = longTerm.text;
+  userContext.memoryProfile = longTerm.memoryProfile;
+
+  const memoryHits = (longTerm.recalled?.results || []).map((r) => ({
+    type: r.type || "memory",
+    content: r.content,
+    score: r.score,
+  }));
+
+  // Notify the event consumers about memory retrieval outcome.
+  emitEvent(state, "memory.vector.retrieved", {
+    userId,
+    source: longTerm.recalled?.source || "none",
+    resultCount: (longTerm.recalled?.results || []).length,
+    cacheHit: longTerm.recalled?.cacheHit || false,
+  });
+
   const elapsed = Date.now() - t0;
   console.log(`[Graph:context] Context ready in ${elapsed} ms`);
+  console.log(
+    `[Graph:context] Long-term memory: ${memoryHits.length} hit(s) from ${longTerm.recalled?.source || "none"}`
+  );
 
   emitEvent(state, "ai.context.resolved", {
     userId,
@@ -92,10 +144,14 @@ export async function retrieveContextNode(state) {
     preloadedNutritionCount: Array.isArray(userContext?.preloadedNutrition)
       ? userContext.preloadedNutrition.length
       : 0,
+    memoryHitCount: memoryHits.length,
+    memorySource: longTerm.recalled?.source || "none",
   });
 
   return {
     userContext,
+    longTermMemory: { text: longTerm.text, source: longTerm.recalled?.source || "none" },
+    memoryHits,
     flowMetrics: { contextRetrievalTime: elapsed },
   };
 }

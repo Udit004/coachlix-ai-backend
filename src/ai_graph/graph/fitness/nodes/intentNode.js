@@ -11,7 +11,9 @@ import {
 
 const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are an AI fitness assistant.
 
-Step 1: Classify the user's intent into:
+You will be given a conversation history followed by the user's latest message.
+
+Step 1: Decide if the latest message is a CONTINUATION of the conversation (e.g. "yes", "sure", "ok", "go ahead", "no", "fine", "let's do it", a short answer to a question the assistant asked, or a follow-up). Classify into:
 - GREETING
 - GENERAL_QUERY
 - PERSONALIZED_QUERY
@@ -26,6 +28,7 @@ Step 2:
 ---
 
 RULES:
+- If the latest message is a short reply/continuation ("yes", "sure", "ok", "go ahead", "no", "that's fine", "start", "let's begin", etc.) that answers the assistant's previous question, DO NOT treat it as a GREETING. Instead classify it as PERSONALIZED_QUERY (needs_rag = true) if it is agreeing to personalized actions (plans, metrics, coaching), or GENERAL_QUERY if it is a simple confirmation.
 - If unsure -> GENERAL_QUERY
 - OFF_TOPIC includes anything NOT related to fitness, health, nutrition, workout, or the Coachlix platform. Examples: coding, python, history, politics, general math (unless fitness related), etc.
 - Do NOT hallucinate user data
@@ -160,22 +163,44 @@ function buildDataNeeds(intentName, originalMessage, directAnswerable = false) {
   };
 }
 
-async function classifyWithSmallLlm(originalMessage) {
+function formatHistoryForClassifier(conversationHistory) {
+  if (!Array.isArray(conversationHistory) || conversationHistory.length === 0) {
+    return "";
+  }
+
+  // Take the last 4 turns (2 user + 2 ai) to keep tokens low while giving
+  // enough context to resolve short follow-up replies like "yes" / "sure".
+  const recent = conversationHistory.slice(-4);
+  return recent
+    .map((msg) => {
+      const role = msg.role === "user" ? "User" : "Assistant";
+      const content = String(msg.content || "").slice(0, 300);
+      return `${role}: ${content}`;
+    })
+    .join("\n");
+}
+
+async function classifyWithSmallLlm(originalMessage, conversationHistory = []) {
   const classifierLlm = createStreamingLLM(false, {
     model:
       process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
       process.env.GENERAL_QUERY_MODEL?.trim() ||
       "gemini-2.5-flash-lite",
     temperature: 0,
-    maxOutputTokens: 180,
+    maxOutputTokens: 200,
     topP: 0.1,
     topK: 1,
     maxRetries: 0,
   });
 
+  const historyText = formatHistoryForClassifier(conversationHistory);
+  const userInput = historyText
+    ? `CONVERSATION HISTORY:\n${historyText}\n\nLATEST USER MESSAGE:\n${originalMessage || ""}`
+    : originalMessage || "";
+
   const output = await classifierLlm.invoke([
     new SystemMessage(INTENT_CLASSIFIER_SYSTEM_PROMPT),
-    new HumanMessage(originalMessage || ""),
+    new HumanMessage(userInput),
   ]);
 
   const rawText =
@@ -246,11 +271,91 @@ const emitEvent = (state, type, payload) => {
   }
 };
 
+// Short affirmation / follow-up replies that usually continue a prior
+// assistant offer (e.g. "Would you like me to build your plan?" -> "yes").
+const AFFIRMATION_PATTERN =
+  /^(yes|yeah|yep|yup|sure|ok|okay|okayy?|alright|fine|go\s*ahead|please\s*(do|go)|let'?s\s*(do|go|start|begin)|do\s*it|start|begin|absolutely|definitely|sounds\s*good|that'?s?\s*(good|fine|great)|correct|right|hmm\s*yes)[\s!.?]*$/i;
+const DECLINE_PATTERN =
+  /^(no|nope|nah|not\s*now|no\s*thanks|not\s*really|maybe\s*later|skip|later)[\s!.?]*$/i;
+
+function containsFollowUpTopic(message) {
+  const text = (message || "").toLowerCase();
+  return /\b(health|bmi|metric|metric(s)?|diet|meal|food|workout|exercise|plan|target|calorie|protein|fat|weight|train|goal)\b/i.test(
+    text
+  ) || /\b(yes|yeah|sure|ok|okay|go ahead|let'?s|start|begin|do it)\b/i.test(text);
+}
+
 export async function intentNode(state) {
-  const { originalMessage, userId } = state;
+  const { originalMessage, userId, conversationHistory = [] } = state;
   const t0 = Date.now();
 
-  if (QUICK_GREETING_PATTERN.test((originalMessage || "").trim())) {
+  // Fast-path affirmation: if the user gives a short confirmation/continuation
+  // and there is preceding assistant context offering a personalized action,
+  // route it to the personalized path WITHOUT an LLM classifier call.
+  const hasHistory = Array.isArray(conversationHistory) && conversationHistory.length > 0;
+  const trimmed = (originalMessage || "").trim();
+
+  if (hasHistory && AFFIRMATION_PATTERN.test(trimmed)) {
+    const lastAssistant = [...conversationHistory]
+      .reverse()
+      .find((m) => m.role === "ai" || m.role === "assistant");
+    const lastAssistantText = String(lastAssistant?.content || "").toLowerCase();
+
+    const offersPersonalizedAction =
+      /\b(calculate|build|create|start|set up|make|generate|proceed with|lets?|let'?s)\b/i.test(
+        lastAssistantText
+      ) &&
+      /\b(health|bmi|metric|diet|meal|plan|workout|exercise|target|calorie|protein|goal|coach)\b/i.test(
+        lastAssistantText
+      );
+
+    if (offersPersonalizedAction || containsFollowUpTopic(originalMessage)) {
+      const result = {
+        intent: "question_specific",
+        confidence: 0.9,
+        requiresData: true,
+        dataNeeds: {
+          needsProfile: true,
+          needsDiet: true,
+          needsWorkout: true,
+          needsHistory: true,
+          needsVectorSearch: true,
+          priority: "high",
+        },
+        classifierIntent: "PERSONALIZED_QUERY",
+        classifierResponse: "",
+        version: "llm-small-v1-affirmation-fastpath",
+      };
+
+      console.log(
+        "[Graph:intent] Affirmation fast-path -> question_specific (continuing prior assistant offer)"
+      );
+
+      emitEvent(state, "ai.intent.classified", {
+        userId,
+        intent: "question_specific",
+        confidence: 0.9,
+        requiresData: true,
+        classifierIntent: "PERSONALIZED_QUERY",
+        fastPath: true,
+        followUp: true,
+      });
+
+      return {
+        intent: result,
+        queryType: QueryType.PERSONALIZED_FITNESS,
+        needsRag: true,
+        greetingResponse: "",
+        enableSearch: false,
+        flowMetrics: { intentClassificationTime: Date.now() - t0 },
+      };
+    }
+  }
+
+  // Ensure a bare greeting is NOT fast-pathed when it's actually a follow-up
+  // confirmation (e.g. user starts with "hi" then continues; only treat as
+  // greeting when there is no meaningful prior context).
+  if (QUICK_GREETING_PATTERN.test(trimmed) && !hasHistory) {
     const quickResult = {
       intent: "greeting",
       confidence: 0.99,
@@ -282,11 +387,11 @@ export async function intentNode(state) {
     };
   }
 
-  let classifierResult;
+let classifierResult;
 
   try {
     classifierResult = await withTimeout(
-      classifyWithSmallLlm(originalMessage),
+      classifyWithSmallLlm(originalMessage, conversationHistory),
       CLASSIFIER_TIMEOUT_MS
     );
   } catch (error) {

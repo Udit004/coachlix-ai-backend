@@ -127,6 +127,16 @@ export const chatService = {
       await memoryService.persistTurn(userId, sessionId, 'ai', assistantResponse);
     }
 
+    // Emit a turn completion event so the async memory promotion + summarization
+    // workers can run OFF the hot request path.
+    await emitAiEvent('turn.persisted', {
+      userId,
+      sessionId,
+      plan,
+      messageCount: conversationHistory.length + 2,
+      responseLength: assistantResponse.length,
+    });
+
     await emitAiEvent('ai.response.generated', {
       userId,
       sessionId,
