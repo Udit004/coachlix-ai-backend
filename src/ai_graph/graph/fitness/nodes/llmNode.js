@@ -12,6 +12,16 @@ function isStreamParseError(error) {
   return text.includes("failed to parse stream");
 }
 
+const emitEvent = (state, type, payload) => {
+  if (typeof state?.onEvent === "function") {
+    try {
+      state.onEvent({ type, ...payload });
+    } catch (error) {
+      console.error(`[Graph:llm] onEvent failed for ${type}:`, error?.message || error);
+    }
+  }
+};
+
 function logResponseSummary(response) {
   const toolCallCount = response.tool_calls?.length ?? 0;
   if (toolCallCount > 0) {
@@ -28,9 +38,18 @@ function logResponseSummary(response) {
 }
 
 export async function llmNode(state) {
-  const { messages, enableSearch, queryType, intent, userContext } = state;
+  const { messages, enableSearch, queryType, intent, userContext, userId } = state;
 
   const isGeneralPath = queryType === QueryType.GENERAL_FITNESS;
+
+  emitEvent(state, "ai.model.thinking", {
+    userId,
+    queryType: String(queryType),
+    intent: intent?.intent,
+    enableSearch,
+    toolCount: isGeneralPath ? 0 : createGraphTools([]).length,
+    messageCount: messages.length,
+  });
 
   if (isGeneralPath) {
     console.log("[Graph:llm] GENERAL path - small model without tools");
@@ -92,6 +111,24 @@ export async function llmNode(state) {
   try {
     const response = await runner.invoke(messages);
     logResponseSummary(response);
+
+    const toolCalls = response.tool_calls?.length ? response.tool_calls : [];
+    if (toolCalls.length > 0) {
+      emitEvent(state, "ai.tool.requested", {
+        userId,
+        tools: toolCalls.map((tc) => tc.name),
+        queryType: String(queryType),
+        intent: intent?.intent,
+      });
+    } else {
+      emitEvent(state, "ai.model.completed", {
+        userId,
+        queryType: String(queryType),
+        intent: intent?.intent,
+        hasToolCalls: false,
+      });
+    }
+
     return { messages: [response] };
   } catch (error) {
     if (!isStreamParseError(error)) {

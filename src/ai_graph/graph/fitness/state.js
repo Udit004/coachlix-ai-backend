@@ -33,7 +33,7 @@ export const GraphState = Annotation.Root({
   conversationHistory: Annotation({ reducer: lastWrite, default: () => [] }),
   profile: Annotation({ reducer: lastWrite, default: () => null }),
 
-  intent: Annotation({ reducer: lastWrite, default: () => null }),
+intent: Annotation({ reducer: lastWrite, default: () => null }),
   queryType: Annotation({ reducer: lastWrite, default: () => null }),
   needsRag: Annotation({ reducer: lastWrite, default: () => false }),
   greetingResponse: Annotation({ reducer: lastWrite, default: () => "" }),
@@ -43,4 +43,8 @@ export const GraphState = Annotation.Root({
   toolsUsed: Annotation({ reducer: appendArray, default: () => [] }),
   startTime: Annotation({ reducer: lastWrite, default: () => 0 }),
   flowMetrics: Annotation({ reducer: mergeObjects, default: () => ({}) }),
+
+  // Callback used by graph nodes to push AI lifecycle events to the
+  // request caller (e.g. forwarded to the frontend via SSE).
+  onEvent: Annotation({ reducer: lastWrite, default: () => null }),
 });

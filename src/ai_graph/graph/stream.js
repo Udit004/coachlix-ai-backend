@@ -48,7 +48,18 @@ function projectProfileForClassification(profile) {
   );
 }
 
-export async function processChatWithGraph(params, onChunk) {
+const emitBoth = async (type, payload, onEvent) => {
+  await emitAiEvent(type, payload);
+  if (typeof onEvent === "function") {
+    try {
+      onEvent({ type, ...payload });
+    } catch (error) {
+      console.error(`[Graph:event] onEvent callback failed for ${type}:`, error?.message || error);
+    }
+  }
+};
+
+export async function processChatWithGraph(params, onChunk, onEvent) {
   const {
     message,
     files = null,
@@ -84,14 +95,15 @@ export async function processChatWithGraph(params, onChunk) {
     startTime,
     toolsUsed: [],
     flowMetrics: {},
+    onEvent,
   };
 
-  await emitAiEvent("ai.reasoning.started", {
+  await emitBoth("ai.reasoning.started", {
     userId,
     plan,
     messagePreview: message.slice(0, 120),
     hasFiles: filesSummary.count > 0,
-  });
+  }, onEvent);
 
   let fullResponse = "";
   let lastWord = "";
@@ -112,12 +124,12 @@ export async function processChatWithGraph(params, onChunk) {
         const chunk = data?.chunk;
         const text = extractChunkText(chunk);
         if (text) {
-          await emitAiEvent("ai.model.token.streamed", {
+          await emitBoth("ai.model.token.streamed", {
             userId,
             plan,
             chunkLength: text.length,
             partialLength: fullResponse.length + text.length,
-          });
+          }, onEvent);
           fullResponse += text;
           lastWord = await streamTextToFrontend(text, fullResponse, onChunk);
         }
@@ -189,12 +201,12 @@ export async function processChatWithGraph(params, onChunk) {
 
     await sendCompletionSignal(onChunk, fullResponse, lastWord || "done");
 
-    await emitAiEvent("ai.reasoning.completed", {
+    await emitBoth("ai.reasoning.completed", {
       userId,
       plan,
       responseLength: fullResponse.length,
       toolsUsed,
-    });
+    }, onEvent);
 
     const totalTime = Date.now() - startTime;
 
@@ -258,11 +270,11 @@ export async function processChatWithGraph(params, onChunk) {
   } catch (error) {
     console.error("[Graph] Pipeline error:", error);
 
-    await emitAiEvent("ai.tool.failed", {
+    await emitBoth("ai.tool.failed", {
       userId,
       plan,
       error: error.message,
-    });
+    }, onEvent);
 
     try {
       await sendCompletionSignal(onChunk, fullResponse, lastWord || "error");

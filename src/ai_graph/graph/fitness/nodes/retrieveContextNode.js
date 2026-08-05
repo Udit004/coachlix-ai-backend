@@ -4,12 +4,30 @@ import { buildSmartContext } from "../../../search/semanticMemoryRetrieval.js";
 import { fetchNutritionFromUSDA } from "../../../tools/nutritionTool.js";
 import { shouldSkipRag } from "../policies.js";
 
+const emitEvent = (state, type, payload) => {
+  if (typeof state?.onEvent === "function") {
+    try {
+      state.onEvent({ type, ...payload });
+    } catch (error) {
+      console.error(`[Graph:context] onEvent failed for ${type}:`, error?.message || error);
+    }
+  }
+};
+
 export async function retrieveContextNode(state) {
   const { userId, originalMessage, intent } = state;
   const t0 = Date.now();
 
   if (shouldSkipRag(intent)) {
     console.log("[Graph:context] RAG SKIPPED (simple intent - no DB query needed)");
+
+    emitEvent(state, "ai.context.resolved", {
+      userId,
+      skipped: true,
+      reason: "simple intent - no DB query needed",
+      durationMs: 0,
+    });
+
     return {
       userContext: {
         profile: { name: "User" },
@@ -60,6 +78,21 @@ export async function retrieveContextNode(state) {
 
   const elapsed = Date.now() - t0;
   console.log(`[Graph:context] Context ready in ${elapsed} ms`);
+
+  emitEvent(state, "ai.context.resolved", {
+    userId,
+    skipped: false,
+    durationMs: elapsed,
+    hasProfile: Boolean(userContext?.profile),
+    hasDietPlan: Boolean(userContext?.dietPlan),
+    hasWorkoutPlan: Boolean(userContext?.workoutPlan),
+    historyLength: Array.isArray(userContext?.conversationHistory)
+      ? userContext.conversationHistory.length
+      : 0,
+    preloadedNutritionCount: Array.isArray(userContext?.preloadedNutrition)
+      ? userContext.preloadedNutrition.length
+      : 0,
+  });
 
   return {
     userContext,

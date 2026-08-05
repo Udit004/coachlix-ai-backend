@@ -3,6 +3,16 @@
 import { ToolMessage } from "@langchain/core/messages";
 import { getToolByName } from "../../../tools/index.js";
 
+const emitEvent = (state, type, payload) => {
+  if (typeof state?.onEvent === "function") {
+    try {
+      state.onEvent({ type, ...payload });
+    } catch (error) {
+      console.error(`[Graph:tools] onEvent failed for ${type}:`, error?.message || error);
+    }
+  }
+};
+
 export async function toolsNode(state) {
   const { messages, userId } = state;
   const lastMessage = messages[messages.length - 1];
@@ -18,6 +28,12 @@ export async function toolsNode(state) {
       toolCalls.map((tc) => tc.name).join(", ")
   );
   const t0 = Date.now();
+
+  emitEvent(state, "ai.tool.requested", {
+    userId,
+    tools: toolCalls.map((tc) => tc.name),
+    count: toolCalls.length,
+  });
 
   const toolMessages = await Promise.all(
     toolCalls.map(async (toolCall) => {
@@ -46,12 +62,20 @@ export async function toolsNode(state) {
         tool_call_id: toolCall.id,
         name: toolCall.name,
       });
-    })
+})
   );
 
+  const elapsed = Date.now() - t0;
   console.log(
-    `[Graph:tools] All ${toolCalls.length} tool(s) resolved in ${Date.now() - t0} ms`
+    `[Graph:tools] All ${toolCalls.length} tool(s) resolved in ${elapsed} ms`
   );
+
+  emitEvent(state, "ai.tool.completed", {
+    userId,
+    tools: toolCalls.map((tc) => tc.name),
+    count: toolCalls.length,
+    durationMs: elapsed,
+  });
 
   return {
     messages: toolMessages,

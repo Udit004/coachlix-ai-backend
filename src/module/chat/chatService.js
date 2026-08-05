@@ -58,7 +58,7 @@ async function getUserProfile(userId) {
 }
 
 export const chatService = {
-  async streamMessage(userId, data, onChunk) {
+  async streamMessage(userId, data, onChunk, onEvent) {
     const { message, plan = 'general', chatId, files } = data;
 
     if (!message || !userId) {
@@ -113,7 +113,8 @@ export const chatService = {
         conversationHistory: await memoryService.buildConversationHistory(userId, sessionId),
         sessionId,
       },
-      onChunk
+      onChunk,
+      onEvent
     );
 
     const assistantResponse = String(result.response || '').trim();

@@ -236,8 +236,18 @@ function shouldDirectAnswerGeneralQuery(message) {
   );
 }
 
+const emitEvent = (state, type, payload) => {
+  if (typeof state?.onEvent === "function") {
+    try {
+      state.onEvent({ type, ...payload });
+    } catch (error) {
+      console.error(`[Graph:intent] onEvent failed for ${type}:`, error?.message || error);
+    }
+  }
+};
+
 export async function intentNode(state) {
-  const { originalMessage } = state;
+  const { originalMessage, userId } = state;
   const t0 = Date.now();
 
   if (QUICK_GREETING_PATTERN.test((originalMessage || "").trim())) {
@@ -252,6 +262,16 @@ export async function intentNode(state) {
     };
 
     console.log("[Graph:intent] Fast-path greeting detected");
+
+    emitEvent(state, "ai.intent.classified", {
+      userId,
+      intent: "greeting",
+      confidence: 0.99,
+      requiresData: false,
+      classifierIntent: "GREETING",
+      fastPath: true,
+    });
+
     return {
       intent: quickResult,
       queryType: QueryType.GREETING,
@@ -329,6 +349,18 @@ export async function intentNode(state) {
 
   const enableSearch = shouldEnableSearch(intent, originalMessage);
   logSearchUsage(state.userId, intent, enableSearch);
+
+  emitEvent(state, "ai.intent.classified", {
+    userId,
+    intent: intent.intent,
+    confidence: intent.confidence,
+    requiresData: intent.requiresData,
+    classifierIntent: intent.classifierIntent,
+    queryType: String(queryType),
+    enableSearch,
+    forcedPersonalized,
+    priority: intent.dataNeeds?.priority,
+  });
 
   console.log(
     `[Graph:intent] ${classifierResult.intent}=>${intent.intent} ` +

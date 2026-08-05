@@ -8,6 +8,22 @@ const sendSseEvent = (reply, payload) => {
   reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
 };
 
+// AI lifecycle events forwarded to the frontend to drive
+// professional status indicators (ChatGPT/Claude style).
+const AI_FRONTEND_EVENTS = new Set([
+  'ai.reasoning.started',
+  'ai.intent.classified',
+  'ai.context.resolved',
+  'ai.model.thinking',
+  'ai.tool.requested',
+  'ai.tool.completed',
+  'ai.tool.failed',
+  'ai.model.token.streamed',
+  'ai.model.completed',
+  'ai.reasoning.completed',
+  'ai.response.generated',
+]);
+
 const parseAllowedOrigins = (value) =>
   String(value || '')
     .split(',')
@@ -123,6 +139,20 @@ export const createChatController = () => ({
             word: word ?? text ?? '',
             partialResponse,
             isComplete: false,
+          });
+        },
+(event) => {
+          if (!event?.type || !AI_FRONTEND_EVENTS.has(event.type)) {
+            return;
+          }
+          // Destructure `type` out so it does NOT overwrite the outer
+          // `type: 'ai_event'` envelope. `event` is the raw event-type string,
+          // and the remaining payload fields are spread alongside it.
+          const { type: eventType, ...eventFields } = event;
+          sendSseEvent(reply, {
+            type: 'ai_event',
+            event: eventType,
+            ...eventFields,
           });
         }
       );
