@@ -8,6 +8,7 @@ import {
   directGeneralNode,
   buildSimplePromptNode,
   retrieveContextNode,
+  goalNode,
   buildPromptNode,
   llmNode,
   toolsNode,
@@ -21,6 +22,7 @@ export function buildFitnessGraph() {
     .addNode("directGeneral", directGeneralNode)
     .addNode("buildSimplePrompt", buildSimplePromptNode)
     .addNode("retrieveContext", retrieveContextNode)
+    .addNode("goal", goalNode)
     .addNode("buildPrompt", buildPromptNode)
     .addNode("llm", llmNode)
     .addNode("tools", toolsNode)
@@ -34,7 +36,8 @@ export function buildFitnessGraph() {
     .addEdge("greeting", END)
     .addEdge("directGeneral", END)
     .addEdge("buildSimplePrompt", "llm")
-    .addEdge("retrieveContext", "buildPrompt")
+    .addEdge("retrieveContext", "goal")
+    .addEdge("goal", "buildPrompt")
     .addEdge("buildPrompt", "llm")
     .addConditionalEdges("llm", shouldContinueToTools)
     .addEdge("tools", "llm");

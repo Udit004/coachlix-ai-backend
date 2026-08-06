@@ -11,6 +11,7 @@ import {
   shouldSkipHistory,
 } from "../policies.js";
 import { emitAiEvent } from "../../../../services/eventBus.js";
+import { formatGoalForContext } from "../../../../services/goalService.js";
 
 export async function buildPromptNode(state) {
   const {
@@ -33,12 +34,22 @@ export async function buildPromptNode(state) {
     console.log(`[Graph:prompt] Profile injected - fields: ${fields.join(", ")}`);
   }
 
-  const { systemPrompt, promptTier } = selectPrompt({
+const { systemPrompt, promptTier } = selectPrompt({
     intent,
     userContext: promptUserContext,
     userId,
   });
   console.log(`[Graph:prompt] ${promptTier} prompt selected`);
+
+  // Inject the user's active goal (if any) into the system prompt so the
+  // assistant reasons in the context of the user's objective, plan, and
+  // progress — the core of goal-based agent behavior.
+  const goalContext = state.activeGoal
+    ? formatGoalForContext(state.activeGoal)
+    : promptUserContext?.goalContext || "";
+  const finalSystemPrompt = goalContext
+    ? `${systemPrompt}\n\n${goalContext}`
+    : systemPrompt;
 
   const chatHistory = buildChatHistory(conversationHistory);
   const filteredHistory = shouldSkipHistory(intent) ? [] : chatHistory;
@@ -58,7 +69,7 @@ export async function buildPromptNode(state) {
     userContent = originalMessage;
   }
 
-  const messages = buildInitialMessages(systemPrompt, filteredHistory, userContent);
+const messages = buildInitialMessages(finalSystemPrompt, filteredHistory, userContent);
   console.log(`[Graph:prompt] ${messages.length} messages assembled`);
 
   await emitAiEvent("ai.prompt.built", {

@@ -45,11 +45,11 @@ const safeJsonParse = (value, fallback) => {
  */
 export async function indexMemory(userId, text, metadata = {}) {
   if (!userId || !text) return false;
-  if (!isPineconeEnabled()) return false;
+  if (!(await isPineconeEnabled())) return false;
 
   try {
     const embeddings = getEmbeddings();
-    const index = getPineconeIndex();
+    const index = await getPineconeIndex();
     if (!embeddings || !index) return false;
 
     const embedding = await embeddings.embedQuery(String(text).slice(0, 8000));
@@ -86,9 +86,9 @@ export async function indexMemory(userId, text, metadata = {}) {
  * Delete a memory vector from Pinecone.
  */
 export async function deleteMemoryVector(vectorId) {
-  if (!vectorId || !isPineconeEnabled()) return false;
+  if (!vectorId || !(await isPineconeEnabled())) return false;
   try {
-    const index = getPineconeIndex();
+    const index = await getPineconeIndex();
     if (!index) return false;
     await index.deleteOne(vectorId);
     return true;
@@ -112,11 +112,11 @@ export async function retrieveMemory(userId, query, { topK } = {}) {
   let cacheHit = false;
   let vectorResults = [];
 
-  // 1. Try Pinecone vector search.
-  if (isPineconeEnabled()) {
+// 1. Try Pinecone vector search.
+  if (await isPineconeEnabled()) {
     try {
       const embeddings = getEmbeddings();
-      const index = getPineconeIndex();
+      const index = await getPineconeIndex();
       if (embeddings && index) {
         const queryEmbedding = await embeddings.embedQuery(String(query).slice(0, 8000));
         const response = await index.query({

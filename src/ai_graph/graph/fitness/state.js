@@ -44,9 +44,15 @@ export const GraphState = Annotation.Root({
   longTermMemory: Annotation({ reducer: lastWrite, default: () => null }),
   memoryHits: Annotation({ reducer: lastWrite, default: () => [] }),
 
-  toolsUsed: Annotation({ reducer: appendArray, default: () => [] }),
+toolsUsed: Annotation({ reducer: appendArray, default: () => [] }),
   startTime: Annotation({ reducer: lastWrite, default: () => 0 }),
   flowMetrics: Annotation({ reducer: mergeObjects, default: () => ({}) }),
+
+  // Goal-based agent state: the user's active goal, loaded during context
+  // retrieval and injected into the prompt so the assistant reasons in the
+  // context of the user's objective rather than in a vacuum.
+  activeGoal: Annotation({ reducer: lastWrite, default: () => null }),
+  goalAction: Annotation({ reducer: lastWrite, default: () => null }),
 
   // Callback used by graph nodes to push AI lifecycle events to the
   // request caller (e.g. forwarded to the frontend via SSE).

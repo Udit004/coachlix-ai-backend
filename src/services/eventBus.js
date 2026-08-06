@@ -75,17 +75,17 @@ export async function emitAiEvent(type, payload = {}) {
     timestamp: new Date().toISOString(),
   };
 
-  if (eventQueue) {
-    void eventQueue.add(type, event).catch((error) => {
-      localEmitter.emit(type, event);
-      localEmitter.emit('event', event);
-      console.warn('[EventBus] BullMQ publish failed, using local fallback:', error?.message || error);
-    });
-    return event;
-  }
-
+  // ALWAYS emit locally first so in-process subscribers (memory promotion,
+  // summarizer, etc.) run immediately regardless of BullMQ availability.
   localEmitter.emit(type, event);
   localEmitter.emit('event', event);
+
+  // Optionally ALSO enqueue to BullMQ for durable/async processing.
+  if (eventQueue) {
+    void eventQueue.add(type, event).catch((error) => {
+      console.warn('[EventBus] BullMQ publish failed (local delivery succeeded):', error?.message || error);
+    });
+  }
 
   return event;
 }

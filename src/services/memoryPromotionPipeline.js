@@ -4,6 +4,12 @@
 //  2. Promotes confident facts into UserMemoryFact (idempotent).
 //  3. Primes the Redis hot cache with the most recent promoted facts.
 // Runs off the hot path (event-driven).
+//
+// To avoid exhausting the Gemini rate limit, this pipeline is throttled:
+//   - trivial/error-only/short conversations skip extraction entirely
+//   - a per-session cooldown prevents re-running the LLM on every turn
+//   - cheap heuristic extraction (no LLM) handles common Coachlix patterns
+//   - the LLM is only used when heuristics find nothing AND budget remains
 
 import { env } from '../config/env.js';
 import { getEventBus } from './eventBus.js';
@@ -14,6 +20,13 @@ import {
   getRecentFacts,
   primeHotCache,
 } from './longTermMemoryService.js';
+import {
+  canSpendMemoryLlmBudget,
+  markMemoryRun,
+  isWithinCooldown,
+  isMemoryWorthy,
+  heuristicExtractFacts,
+} from './memoryThrottle.js';
 
 const EXTRACTION_PROMPT = `You are a memory extraction agent for Coachlix, an AI fitness coach.
 Read the conversation transcript and extract STABLE, durable facts worth remembering across sessions.
@@ -87,6 +100,7 @@ export async function runMemoryPromotion(session) {
   if (!session?._id) return { promoted: 0 };
 
   const userId = session.userId;
+  const sessionId = String(session._id);
   const messages = Array.isArray(session.messages) ? session.messages : [];
   const transcript = messages
     .map((m) => `${m.role === 'user' ? 'User' : 'Coachlix'}: ${String(m.content || '').slice(0, 400)}`)
@@ -94,7 +108,32 @@ export async function runMemoryPromotion(session) {
 
   if (!transcript.trim()) return { promoted: 0 };
 
-  const candidates = await extractFacts(transcript);
+  // Skip if the conversation is trivial / error-only / too short to matter.
+  if (!isMemoryWorthy(messages, { minMessages: 2 })) {
+    return { promoted: 0, skipped: 'not-memory-worthy' };
+  }
+
+  // Respect the per-session cooldown so we don't call the LLM on every turn.
+  if (await isWithinCooldown('promotion', sessionId)) {
+    return { promoted: 0, skipped: 'cooldown' };
+  }
+
+  // Try cheap heuristic extraction first (no LLM call). If it captures the
+  // common Coachlix patterns, we can skip the LLM entirely.
+  let candidates = heuristicExtractFacts(messages);
+
+  // Only fall back to the LLM when heuristic found nothing AND we still have
+  // budget for a memory LLM call this minute.
+  if (candidates.length === 0) {
+    if (await canSpendMemoryLlmBudget()) {
+      candidates = await extractFacts(transcript);
+    }
+  }
+
+  // Mark this session as processed so we wait out the cooldown before the
+  // next LLM call for the same conversation.
+  await markMemoryRun('promotion', sessionId);
+
   const promotionThreshold = env.memoryPromotionThreshold || 3;
 
   let promoted = 0;
@@ -241,13 +280,11 @@ export function registerMemoryPromotionPipeline() {
     }
   };
 
+  // Listen on the specific event types only. emitAiEvent now delivers typed
+  // events directly on the local emitter, so we avoid the generic 'event'
+  // catch-all (which would double-fire now that local delivery is guaranteed).
   bus.on('turn.persisted', handler);
   bus.on('ai.response.generated', handler);
-  bus.on('event', (event) => {
-    if (event?.type === 'turn.persisted' || event?.type === 'ai.response.generated') {
-      handler(event);
-    }
-  });
 
   return handler;
 }

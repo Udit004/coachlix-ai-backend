@@ -6,6 +6,7 @@ import { registerChatModule } from '../module/chat/routes.js';
 import { registerExercisesModule } from '../module/exercises/routes.js';
 import { registerFoodsModule } from '../module/foods/routes.js';
 import { registerPritikaPortfolioModule } from '../pritikaPortfolio/index.js';
+import { registerGoalModule } from '../module/goal/index.js';
 
 
 export async function apiRoutes(fastify) {
@@ -22,7 +23,8 @@ export async function apiRoutes(fastify) {
   await fastify.register(registerPritikaPortfolioModule, {
     prefix: '/pritika-portfolio'
   });
-  await fastify.register(registerDashboardModule);
+await fastify.register(registerDashboardModule);
   await fastify.register(registerProfileModule);
+  await fastify.register(registerGoalModule, { prefix: '/goals' });
 
 }

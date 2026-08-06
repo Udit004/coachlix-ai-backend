@@ -271,6 +271,17 @@ const emitEvent = (state, type, payload) => {
   }
 };
 
+// Queries that ask the assistant to recall past conversation / memory. These
+// MUST go through the personalized path so long-term memory and history are
+// loaded and injected; otherwise the LLM truthfully says "I have no memory".
+// The alternatives are intentionally broad to tolerate word order variations:
+//   - explicit "recall"/"remember"
+//   - question verb + subject + past-action (what have we done / what did we
+//     discuss / what we have talked about / tell me what we worked on)
+//   - temporal marker + memory noun (recent/previous/past ... conversation)
+const RECALL_QUERY_PATTERN =
+  /\b(recall|remember)\b|\b(what|tell|show|summarize)\b.*\b(we|you|our)\b.*\b(done|do|discuss(?:ed)?|talk(?:ed)?|chat(?:ted)?|work(?:ed)?|cover(?:ed)?|been|said|spoke)\b|\b(recent|previous|past|earlier|before)\b.*\b(conversation|chat|memory|discussion|talk|history)\b/i;
+
 // Short affirmation / follow-up replies that usually continue a prior
 // assistant offer (e.g. "Would you like me to build your plan?" -> "yes").
 const AFFIRMATION_PATTERN =
@@ -350,6 +361,52 @@ export async function intentNode(state) {
         flowMetrics: { intentClassificationTime: Date.now() - t0 },
       };
     }
+  }
+
+// Fast-path memory recall: when the user asks the assistant to recall past
+  // conversation/memory, ALWAYS route to the personalized path so long-term
+  // memory and history get loaded and injected. Bypasses the LLM classifier
+  // (saves a call) and avoids the general path that strips memory.
+  if (RECALL_QUERY_PATTERN.test(trimmed)) {
+    const recallResult = {
+      intent: "question_specific",
+      confidence: 0.92,
+      requiresData: true,
+      dataNeeds: {
+        needsProfile: true,
+        needsDiet: false,
+        needsWorkout: false,
+        needsHistory: true,
+        needsVectorSearch: true,
+        priority: "high",
+      },
+      classifierIntent: "PERSONALIZED_QUERY",
+      classifierResponse: "",
+      version: "llm-small-v1-recall-fastpath",
+    };
+
+    console.log(
+      "[Graph:intent] Recall fast-path -> question_specific (loading long-term memory + history)"
+    );
+
+    emitEvent(state, "ai.intent.classified", {
+      userId,
+      intent: "question_specific",
+      confidence: 0.92,
+      requiresData: true,
+      classifierIntent: "PERSONALIZED_QUERY",
+      fastPath: true,
+      memoryRecall: true,
+    });
+
+    return {
+      intent: recallResult,
+      queryType: QueryType.PERSONALIZED_FITNESS,
+      needsRag: true,
+      greetingResponse: "",
+      enableSearch: false,
+      flowMetrics: { intentClassificationTime: Date.now() - t0 },
+    };
   }
 
   // Ensure a bare greeting is NOT fast-pathed when it's actually a follow-up

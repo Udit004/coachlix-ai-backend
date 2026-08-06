@@ -5,6 +5,7 @@ import { setupAIModule } from './services/aiIntegration.js';
 import { initializeEventBus, closeEventBus } from './services/eventBus.js';
 import { registerMemoryPromotionPipeline } from './services/memoryPromotionPipeline.js';
 import { registerSummarizeWorker } from './services/summarizeWorker.js';
+import { registerGoalScheduler } from './services/goalScheduler.js';
 
 const start = async () => {
   const fastify = await buildServer();
@@ -14,10 +15,11 @@ const start = async () => {
     await setupAIModule(env.geminiApiKey);
     await initializeEventBus(fastify);
 
-    // Register background memory workers (off the hot request path).
+// Register background memory workers (off the hot request path).
     registerMemoryPromotionPipeline();
     registerSummarizeWorker();
-    fastify.log.info('Long-term memory workers registered (promotion + summarizer)');
+    registerGoalScheduler();
+    fastify.log.info('Background workers registered (promotion + summarizer + goal scheduler)');
 
     await fastify.listen({
       host: env.host,

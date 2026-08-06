@@ -3,6 +3,11 @@
 // the session crosses the message threshold, generates a compact summary via
 // Gemini, persists it to MongoDB, and indexes it into Pinecone for semantic
 // recall. Runs off the hot request path.
+//
+// To avoid exhausting the Gemini rate limit, the summarizer is throttled:
+//   - trivial / error-only / short conversations are skipped
+//   - a per-session cooldown prevents summarising the same chat too often
+//   - a global per-minute budget caps how many LLM summarizations can run
 
 import ConversationSummary from '../models/ConversationSummary.js';
 import ChatSession from '../models/ChatSession.js';
@@ -10,6 +15,12 @@ import { connectMongo } from '../db/mongo.js';
 import { env } from '../config/env.js';
 import { getEventBus } from './eventBus.js';
 import { indexMemory } from './longTermMemoryService.js';
+import {
+  canSpendMemoryLlmBudget,
+  markMemoryRun,
+  isWithinCooldown,
+  isMemoryWorthy,
+} from './memoryThrottle.js';
 
 const SUMMARY_SYSTEM_PROMPT = `You are a memory summarizer for Coachlix, an AI fitness coach.
 Given a conversation transcript, produce a concise summary in plain text (no markdown) that captures:
@@ -64,6 +75,21 @@ export async function summarizeSession(session) {
     return null;
   }
 
+  // Skip trivial / error-only conversations so we don't waste LLM calls.
+  if (!isMemoryWorthy(messages, {})) {
+    return null;
+  }
+
+  // Respect per-session cooldown so we don't summarise on every turn.
+  if (await isWithinCooldown('summary', sessionId)) {
+    return null;
+  }
+
+  // Enforce a global per-minute budget for memory LLM calls.
+  if (!(await canSpendMemoryLlmBudget())) {
+    return null;
+  }
+
   const transcript = buildTranscript(messages);
   if (!transcript.trim()) return null;
 
@@ -104,6 +130,9 @@ export async function summarizeSession(session) {
       .slice(0, 3)
       .join(' | ')}`;
   }
+
+  // Mark this session as summarised so we wait out the cooldown.
+  await markMemoryRun('summary', sessionId);
 
   topics = [
     /diet|meal|food|nutrition|calorie|protein/i.test(summaryText) ? 'nutrition' : null,
@@ -165,13 +194,11 @@ export function registerSummarizeWorker() {
     }
   };
 
+  // Listen on the specific event types only. emitAiEvent now delivers typed
+  // events directly on the local emitter, so we avoid the generic 'event'
+  // catch-all (which would double-fire now that local delivery is guaranteed).
   bus.on('turn.persisted', handler);
   bus.on('ai.response.generated', handler);
-  bus.on('event', (event) => {
-    if (event?.type === 'turn.persisted' || event?.type === 'ai.response.generated') {
-      handler(event);
-    }
-  });
 
   return handler;
 }
