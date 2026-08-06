@@ -185,7 +185,7 @@ async function classifyWithSmallLlm(originalMessage, conversationHistory = []) {
     model:
       process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
       process.env.GENERAL_QUERY_MODEL?.trim() ||
-      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
     temperature: 0,
     maxOutputTokens: 200,
     topP: 0.1,
@@ -288,12 +288,36 @@ const AFFIRMATION_PATTERN =
   /^(yes|yeah|yep|yup|sure|ok|okay|okayy?|alright|fine|go\s*ahead|please\s*(do|go)|let'?s\s*(do|go|start|begin)|do\s*it|start|begin|absolutely|definitely|sounds\s*good|that'?s?\s*(good|fine|great)|correct|right|hmm\s*yes)[\s!.?]*$/i;
 const DECLINE_PATTERN =
   /^(no|nope|nah|not\s*now|no\s*thanks|not\s*really|maybe\s*later|skip|later)[\s!.?]*$/i;
+const GOAL_REQUEST_PATTERN =
+  /\b(create|build|make|start|set up|design|prepare|give me|help me create)\b.*\b(diet|meal|nutrition|workout|training|fitness|goal|plan|routine|schedule)\b|\b(i want to|i need to|my goal is|i am trying to)\b.*\b(lose weight|gain muscle|build muscle|eat better|get fit|improve fitness)\b/i;
+const GOAL_FOLLOW_UP_TOPIC_PATTERN =
+  /\b(vegetarian|vegan|non[\s-]?vegetarian|jain|home|gym|days? a week|kg|kgs|lb|lbs|pounds|lose|gain|weight|target)\b/i;
 
 function containsFollowUpTopic(message) {
   const text = (message || "").toLowerCase();
   return /\b(health|bmi|metric|metric(s)?|diet|meal|food|workout|exercise|plan|target|calorie|protein|fat|weight|train|goal)\b/i.test(
     text
   ) || /\b(yes|yeah|sure|ok|okay|go ahead|let'?s|start|begin|do it)\b/i.test(text);
+}
+
+function isGoalFollowUp(message, conversationHistory = []) {
+  const text = (message || "").trim();
+  if (!text || text.length > 120 || !GOAL_FOLLOW_UP_TOPIC_PATTERN.test(text)) {
+    return false;
+  }
+
+  const lastAssistant = [...conversationHistory]
+    .reverse()
+    .find((m) => m.role === "ai" || m.role === "assistant");
+  const lastAssistantText = String(lastAssistant?.content || "").toLowerCase();
+
+  const wasAskingGoalQuestion =
+    /\?/.test(lastAssistantText) &&
+    /\b(goal|diet|meal|nutrition|workout|training|plan|weight|target|preference|days|gym|home)\b/i.test(
+      lastAssistantText
+    );
+
+  return wasAskingGoalQuestion;
 }
 
 export async function intentNode(state) {
@@ -361,6 +385,44 @@ export async function intentNode(state) {
         flowMetrics: { intentClassificationTime: Date.now() - t0 },
       };
     }
+  }
+
+  if (GOAL_REQUEST_PATTERN.test(trimmed) || isGoalFollowUp(trimmed, conversationHistory)) {
+    const result = {
+      intent: "question_specific",
+      confidence: 0.93,
+      requiresData: true,
+      dataNeeds: {
+        needsProfile: true,
+        needsDiet: /\b(diet|meal|nutrition)\b/i.test(trimmed),
+        needsWorkout: /\b(workout|training|gym|routine)\b/i.test(trimmed),
+        needsHistory: true,
+        needsVectorSearch: true,
+        priority: "high",
+      },
+      classifierIntent: "PERSONALIZED_QUERY",
+      classifierResponse: "",
+      version: "llm-small-v1-goal-fastpath",
+    };
+
+    emitEvent(state, "ai.intent.classified", {
+      userId,
+      intent: "question_specific",
+      confidence: result.confidence,
+      requiresData: true,
+      classifierIntent: "PERSONALIZED_QUERY",
+      fastPath: true,
+      goalRequest: true,
+    });
+
+    return {
+      intent: result,
+      queryType: QueryType.PERSONALIZED_FITNESS,
+      needsRag: true,
+      greetingResponse: "",
+      enableSearch: false,
+      flowMetrics: { intentClassificationTime: Date.now() - t0 },
+    };
   }
 
 // Fast-path memory recall: when the user asks the assistant to recall past

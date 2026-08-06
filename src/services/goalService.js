@@ -8,6 +8,7 @@ import UserGoal from '../models/UserGoal.js';
 import { connectMongo } from '../db/mongo.js';
 import { emitAiEvent } from './eventBus.js';
 import { promoteFact } from './longTermMemoryService.js';
+import goalCache from './goalCache.js';
 
 const GOAL_TYPES = ['weight_loss', 'muscle_gain', 'endurance', 'nutrition', 'general'];
 
@@ -173,6 +174,11 @@ export async function createGoal(userId, input = {}) {
     title: goal.title,
   });
 
+  // Warm the active-goal cache and clear any pending draft now that the goal
+  // is realized.
+  await goalCache.setCachedActiveGoal(userId, goal);
+  await goalCache.clearGoalDraft(userId);
+
   return goal;
 }
 
@@ -244,6 +250,9 @@ export async function updateGoalProgress(userId, goalId, input = {}) {
     }
   );
 
+  // Invalidate the cache so the next read re-warms with the new progress.
+  await goalCache.invalidateCachedActiveGoal(userId);
+
   return goal;
 }
 
@@ -286,16 +295,34 @@ export async function updateGoalStep(goalId, stepIndex, status) {
     });
   }
 
+  // Invalidate the user's active-goal cache so the updated plan step is
+  // reflected on the next read.
+  await goalCache.invalidateCachedActiveGoal(goal.userId);
+
   return goal;
 }
 
 /**
  * Get the user's active goal (single focused goal).
+ * Reads from the Redis cache first for fast hot-path lookups (the LangGraph
+ * goal node runs on every personalized turn), then falls back to MongoDB and
+ * warms the cache.
  */
 export async function getActiveGoal(userId) {
   if (!userId) return null;
+
+  const cached = await goalCache.getCachedActiveGoal(userId);
+  if (cached) {
+    return cached;
+  }
+
   await connectMongo();
-  return UserGoal.findOne({ userId, status: 'active' }).sort({ updatedAt: -1 });
+  const goal = await UserGoal.findOne({ userId, status: 'active' }).sort({ updatedAt: -1 });
+
+  // Warm the cache whether or not a goal exists (null clears any stale entry).
+  await goalCache.setCachedActiveGoal(userId, goal || null);
+
+  return goal;
 }
 
 /**

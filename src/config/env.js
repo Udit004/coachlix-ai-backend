@@ -40,9 +40,22 @@ pineconeEmbeddingModel: process.env.PINECONE_EMBEDDING_MODEL || 'gemini-embeddin
   memorySummaryThreshold: toNumber(process.env.MEMORY_SUMMARY_THRESHOLD, 4),
 memoryProfileTtlSeconds: toNumber(process.env.MEMORY_PROFILE_TTL_SECONDS, 60 * 60),
   memoryHotCacheTtlSeconds: toNumber(process.env.MEMORY_HOT_CACHE_TTL_SECONDS, 60 * 30),
-  geminiSummarizerModel: process.env.GEMINI_SUMMARIZER_MODEL || 'gemini-2.5-flash-lite',
-  memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
+  geminiSummarizerModel: process.env.GEMINI_SUMMARIZER_MODEL || 'gemini-2.5-flash',
+memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
   memoryLlmMaxPerMinute: toNumber(process.env.MEMORY_LLM_MAX_PER_MINUTE, 10),
+
+  // ── Goal-Based Agent (Redis caching) ───────────────────────────────────
+  // TTL for the cached active goal per user. Goals change rarely, so a 1h
+  // cache keeps hot lookups fast while staying fresh enough for progress /
+  // status updates to be reflected quickly.
+  goalActiveCacheTtlSeconds: toNumber(
+    process.env.GOAL_ACTIVE_CACHE_TTL_SECONDS,
+    60 * 60
+  ),
+  // TTL for a "draft" goal that is awaiting clarification from the user.
+  // After this window the draft expires so a stale partial goal is not
+  // resumed later.
+  goalDraftTtlSeconds: toNumber(process.env.GOAL_DRAFT_TTL_SECONDS, 60 * 30),
 
   firebaseAdminProjectId: process.env.FIREBASE_ADMIN_PROJECT_ID || '',
   firebaseAdminPrivateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY || '',

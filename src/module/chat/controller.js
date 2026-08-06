@@ -14,7 +14,9 @@ const AI_FRONTEND_EVENTS = new Set([
   'ai.reasoning.started',
   'ai.intent.classified',
   'ai.context.resolved',
+  'ai.prompt.built',
   'ai.model.thinking',
+  'ai.model.requested',
   'ai.tool.requested',
   'ai.tool.completed',
   'ai.tool.failed',
@@ -22,6 +24,11 @@ const AI_FRONTEND_EVENTS = new Set([
   'ai.model.completed',
   'ai.reasoning.completed',
   'ai.response.generated',
+  'goal.created',
+  'goal.lookup',
+  'goal.progress.updated',
+  'goal.draft.saved',
+  'goal.draft.updated',
 ]);
 
 const parseAllowedOrigins = (value) =>

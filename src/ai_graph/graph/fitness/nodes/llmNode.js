@@ -85,7 +85,7 @@ export async function llmNode(state) {
       model:
         process.env.GENERAL_QUERY_MODEL?.trim() ||
         process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
-        "gemini-2.5-flash-lite",
+        "gemini-2.5-flash",
       temperature: 0.2,
       maxRetries: 0,
     });
@@ -145,7 +145,7 @@ export async function llmNode(state) {
           model:
             process.env.GENERAL_QUERY_MODEL?.trim() ||
             process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
-            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
           temperature: 0.2,
           maxRetries: 0,
         });

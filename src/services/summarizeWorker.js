@@ -107,7 +107,7 @@ export async function summarizeSession(session) {
     const { ChatGoogleGenerativeAI } = await import('@langchain/google-genai');
     const llm = new ChatGoogleGenerativeAI({
       apiKey: env.geminiApiKey,
-      model: env.geminiSummarizerModel || 'gemini-2.5-flash-lite',
+      model: env.geminiSummarizerModel || 'gemini-2.5-flash',
       temperature: 0.2,
       maxOutputTokens: 512,
     });
