@@ -5,7 +5,9 @@ import { env } from '../../config/env.js';
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 
 const sendSseEvent = (reply, payload) => {
-  reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+  // Append 4KB of whitespace as an SSE comment (starts with ':') to force proxies to flush
+  const padding = `:${' '.repeat(4096)}\n`;
+  reply.raw.write(`data: ${JSON.stringify(payload)}\n${padding}\n`);
 };
 
 // AI lifecycle events forwarded to the frontend to drive
