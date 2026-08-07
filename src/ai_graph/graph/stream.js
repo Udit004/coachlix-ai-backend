@@ -120,18 +120,24 @@ export async function processChatWithGraph(params, onChunk, onEvent) {
     for await (const event of eventStream) {
       const { event: eventType, data, metadata } = event;
 
-      if (eventType === "on_chat_model_stream" && metadata?.langgraph_node === "llm") {
+      if (eventType === "on_chat_model_stream") {
         const chunk = data?.chunk;
         const text = extractChunkText(chunk);
         if (text) {
-          await emitBoth("ai.model.token.streamed", {
-            userId,
-            plan,
-            chunkLength: text.length,
-            partialLength: fullResponse.length + text.length,
-          }, onEvent);
-          fullResponse += text;
-          lastWord = await streamTextToFrontend(text, fullResponse, onChunk);
+          if (metadata?.langgraph_node === "llm") {
+            await emitBoth("ai.model.token.streamed", {
+              userId,
+              plan,
+              chunkLength: text.length,
+              partialLength: fullResponse.length + text.length,
+            }, onEvent);
+            fullResponse += text;
+            lastWord = await streamTextToFrontend(text, fullResponse, onChunk);
+          } else {
+            if (typeof onChunk === "function") {
+              await onChunk({ type: "thought_chunk", text });
+            }
+          }
         }
         continue;
       }

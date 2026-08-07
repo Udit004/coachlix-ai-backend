@@ -147,11 +147,18 @@ export const createChatController = () => ({
       const result = await chatService.streamMessage(
         request.user.uid,
         { message, plan, chatId, files },
-        async ({ word, text, partialResponse }) => {
+        async (chunkData) => {
+          if (chunkData.type === 'thought_chunk') {
+            sendSseEvent(reply, {
+              type: 'thought_chunk',
+              text: chunkData.text,
+            });
+            return;
+          }
           sendSseEvent(reply, {
             type: 'word',
-            word: word ?? text ?? '',
-            partialResponse,
+            word: chunkData.word ?? chunkData.text ?? '',
+            partialResponse: chunkData.partialResponse,
             isComplete: false,
           });
         },
