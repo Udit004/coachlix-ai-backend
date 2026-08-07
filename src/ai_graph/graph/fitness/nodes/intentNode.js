@@ -29,6 +29,7 @@ Step 2:
 
 RULES:
 - MEMORY RECALL (IMPORTANT): If the latest message asks about a PAST or RECENT conversation — e.g. "what were we talking about", "what did we discuss recently", "what we are discussing recently", "remind me what we talked about last time", "what have we done so far", "recall our last chat", "what is the last thing we discussed" — classify it as PERSONALIZED_QUERY with needs_rag = true. Answering it REQUIRES loading conversation history and long-term memory, so the general path MUST NOT be used. This applies even if the message is phrased casually or in another language.
+- COACHING / SKILL-LEARNING (IMPORTANT): If the user asks you to guide, coach, teach, or walk them through an exercise, movement, or skill (e.g. "guide me through the pull up", "teach me how to deadlift", "show me how to do a proper squat", "how do I do a push-up", "I want to learn pull-ups", "my goal is to master the bench press"), classify it as PERSONALIZED_QUERY with needs_rag = true. Tailored coaching REQUIRES the user's profile, experience level, fitness goal, and history, so the general path MUST NOT be used.
 - The latest message may reference something from the conversation history (e.g. "that plan", "my routine", "continue", "about that"). Use the provided history to decide: if it continues a personalized action, mark PERSONALIZED_QUERY.
 - If the latest message is a short reply/continuation ("yes", "sure", "ok", "go ahead", "no", "that's fine", "start", "let's begin", etc.) that answers the assistant's previous question, DO NOT treat it as a GREETING. Classify it as PERSONALIZED_QUERY (needs_rag = true) if it agrees to personalized actions (plans, metrics, coaching), or GENERAL_QUERY if it is a simple confirmation.
 - If unsure -> GENERAL_QUERY
@@ -293,7 +294,19 @@ const AFFIRMATION_PATTERN =
 const DECLINE_PATTERN =
   /^(no|nope|nah|not\s*now|no\s*thanks|not\s*really|maybe\s*later|skip|later)[\s!.?]*$/i;
 const GOAL_REQUEST_PATTERN =
-  /\b(create|build|make|start|set up|design|prepare|give me|help me create)\b.*\b(diet|meal|nutrition|workout|training|fitness|goal|plan|routine|schedule)\b|\b(i want to|i need to|my goal is|i am trying to)\b.*\b(lose weight|gain muscle|build muscle|eat better|get fit|improve fitness)\b/i;
+  /\b(create|build|make|start|set up|design|prepare|give me|help me create)\b.*\b(diet|meal|nutrition|workout|training|fitness|goal|plan|routine|schedule)\b|\b(i want to|i need to|my goal is|i am trying to|my aim is|i\'?d like to)\b.*\b(lose weight|gain muscle|build muscle|eat better|get fit|improve fitness|learn|master|get better|start|begin)\b/i;
+
+// Coaching / skill-learning requests that MUST reach the goal-aware
+// (personalized) path: the assistant needs the user's profile, experience
+// level, fitness goal, and long-term memory to tailor the coaching. Examples:
+//   - "guide me through the pull up exercise"
+//   - "teach me how to do a proper deadlift"
+//   - "my goal is to learn this exercise"
+//   - "how do I do a handstand push-up for a beginner"
+// These bypass the LLM classifier (cheap regex) and go straight to
+// retrieveContext -> goalNode -> turn plan.
+const COACHING_REQUEST_PATTERN =
+  /\b(guide|coach|teach|train|help)\s+me\b|\b(show|tell)\s+me\s+how\b|\bhow\s+do\s+i\b|\bhow\s+to\s+(do|perform|improve|master|learn)\b|\b(learn|master|practice|improve|perfect)\s+(the|this|my)?\s*(exercise|movement|skill|form|technique|pull.?up|push.?up|squat|deadlift|bench|lunge|plank|dip|row|curl)\b|\bmy\s+goal\s+is\s+to\s+(learn|master|improve|get\s+better\s+at|perfect)\b/i;
 const GOAL_FOLLOW_UP_TOPIC_PATTERN =
   /\b(vegetarian|vegan|non[\s-]?vegetarian|jain|home|gym|days? a week|kg|kgs|lb|lbs|pounds|lose|gain|weight|target)\b/i;
 
@@ -389,6 +402,52 @@ export async function intentNode(state) {
         flowMetrics: { intentClassificationTime: Date.now() - t0 },
       };
     }
+  }
+
+// Fast-path coaching / skill-learning: coaching the user on an exercise,
+  // form, or skill requires their profile, experience level, and long-term
+  // memory to tailor the guidance. Route straight to the personalized path
+  // (retrieveContext -> goalNode -> turn plan) — no LLM classifier call.
+  if (COACHING_REQUEST_PATTERN.test(trimmed)) {
+    const result = {
+      intent: "question_specific",
+      confidence: 0.95,
+      requiresData: true,
+      dataNeeds: {
+        needsProfile: true,
+        needsDiet: /\b(diet|meal|nutrition|food)\b/i.test(trimmed),
+        needsWorkout: true,
+        needsHistory: true,
+        needsVectorSearch: true,
+        priority: "high",
+      },
+      classifierIntent: "PERSONALIZED_QUERY",
+      classifierResponse: "",
+      version: "llm-small-v1-coaching-fastpath",
+    };
+
+    console.log(
+      "[Graph:intent] Coaching fast-path -> question_specific (exercise/skill-learning requires profile + goal context)"
+    );
+
+    emitEvent(state, "ai.intent.classified", {
+      userId,
+      intent: "question_specific",
+      confidence: 0.95,
+      requiresData: true,
+      classifierIntent: "PERSONALIZED_QUERY",
+      fastPath: true,
+      coachingRequest: true,
+    });
+
+    return {
+      intent: result,
+      queryType: QueryType.PERSONALIZED_FITNESS,
+      needsRag: true,
+      greetingResponse: "",
+      enableSearch: false,
+      flowMetrics: { intentClassificationTime: Date.now() - t0 },
+    };
   }
 
   if (GOAL_REQUEST_PATTERN.test(trimmed) || isGoalFollowUp(trimmed, conversationHistory)) {
@@ -529,8 +588,12 @@ let classifierResult;
   //  2. Memory-recall phrasing ("what did we discuss recently") -> personalized
   //     so history + long-term memory are loaded. The LLM classifier should
   //     catch these, but this regex is a safety net for any missed phrasing.
+  //  3. Coaching / skill-learning phrasing -> personalized (needs profile +
+  //     experience + goal context to tailor guidance).
   const forcedPersonalized =
-    shouldForcePersonalizedQuery(originalMessage) || RECALL_QUERY_PATTERN.test(trimmed);
+    shouldForcePersonalizedQuery(originalMessage) ||
+    RECALL_QUERY_PATTERN.test(trimmed) ||
+    COACHING_REQUEST_PATTERN.test(trimmed);
   if (forcedPersonalized && classifierResult.intent !== "PERSONALIZED_QUERY") {
     classifierResult = {
       ...classifierResult,
