@@ -5,7 +5,6 @@ import { env } from '../../config/env.js';
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 
 const sendSseEvent = (reply, payload) => {
-  // Write a clean, small SSE frame. Compression is blocked via
   // `Content-Encoding: identity` and Nagle is disabled with TcpNoDelay, so no
   // whitespace padding is needed to force proxies to flush.
   reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
