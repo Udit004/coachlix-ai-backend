@@ -11,11 +11,9 @@ export class NotificationService {
 
     const admin = getFirebaseAdmin();
     const message = {
-      notification: {
-        title,
-        body
-      },
       data: {
+        title: String(title),
+        body: String(body),
         ...Object.fromEntries(
           Object.entries(data).map(([key, value]) => [key, String(value)])
         ),
