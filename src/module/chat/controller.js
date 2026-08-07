@@ -130,7 +130,12 @@ export const createChatController = () => ({
         'X-Accel-Buffering': 'no',
         ...buildSseCorsHeaders(request),
       });
-      reply.raw.flushHeaders?.();
+      if (typeof reply.raw.flushHeaders === 'function') {
+        reply.raw.flushHeaders();
+      }
+
+      // Send 2KB of padding to force reverse proxies (like NGINX, Heroku, Render) to flush the buffer
+      reply.raw.write(`:${' '.repeat(2048)}\n\n`);
 
       sendSseEvent(reply, {
         type: 'connection',
