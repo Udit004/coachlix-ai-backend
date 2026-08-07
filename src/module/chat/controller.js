@@ -5,9 +5,10 @@ import { env } from '../../config/env.js';
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 
 const sendSseEvent = (reply, payload) => {
-  // Append 4KB of whitespace as an SSE comment (starts with ':') to force proxies to flush
-  const padding = `:${' '.repeat(4096)}\n`;
-  reply.raw.write(`data: ${JSON.stringify(payload)}\n${padding}\n`);
+  // Write a clean, small SSE frame. Compression is blocked via
+  // `Content-Encoding: identity` and Nagle is disabled with TcpNoDelay, so no
+  // whitespace padding is needed to force proxies to flush.
+  reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
 };
 
 // AI lifecycle events forwarded to the frontend to drive
@@ -130,19 +131,32 @@ export const createChatController = () => ({
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
+        'Content-Encoding': 'identity', // block any compression negotiation
         ...buildSseCorsHeaders(request),
       });
+
+      // Kill Nagle's algorithm — this is the one most people miss.
+      if (reply.raw.socket) {
+        reply.raw.socket.setNoDelay(true);
+      }
       if (typeof reply.raw.flushHeaders === 'function') {
         reply.raw.flushHeaders();
       }
-
-      // Send 2KB of padding to force reverse proxies (like NGINX, Heroku, Render) to flush the buffer
-      reply.raw.write(`:${' '.repeat(2048)}\n\n`);
 
       sendSseEvent(reply, {
         type: 'connection',
         message: 'SSE connection established',
       });
+
+      // Heartbeat comment every 15s to stop Render's proxy from closing the
+      // idle connection. This is connection-liveness only — NOT a force-flush.
+      const heartbeat = setInterval(() => {
+        try {
+          reply.raw.write(': ping\n\n');
+        } catch (_) {
+          clearInterval(heartbeat);
+        }
+      }, 15000);
 
       const result = await chatService.streamMessage(
         request.user.uid,
@@ -186,6 +200,7 @@ export const createChatController = () => ({
         chatId: result.chatId,
       });
 
+      clearInterval(heartbeat);
       reply.raw.end();
     } catch (error) {
       console.error('[Chat Controller] Streaming error:', error);
@@ -203,6 +218,7 @@ export const createChatController = () => ({
           error: error.message || 'Unexpected streaming error occurred.',
         });
       } finally {
+        clearInterval(heartbeat);
         reply.raw.end();
       }
     }
