@@ -104,10 +104,9 @@ const UserSchema = new mongoose.Schema(
       trim: true,
       default: null
     },
-    pushToken: {
-      type: String,
-      default: null,
-      trim: true
+    pushTokens: {
+      type: [String],
+      default: []
     },
     profileCompleted: {
       type: Boolean,

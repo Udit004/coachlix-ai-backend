@@ -81,20 +81,20 @@ export function registerAiCompletionNotificationWorker() {
       await connectMongo();
 
       const [user, session] = await Promise.all([
-        User.findOne({ firebaseUid: userId }).select({ pushToken: 1, name: 1 }).lean(),
+        User.findOne({ firebaseUid: userId }).select({ pushTokens: 1, name: 1 }).lean(),
         ChatSession.findById(sessionId).select({ title: 1, plan: 1 }).lean(),
       ]);
 
-      if (!user?.pushToken) {
-        console.log(`[AiCompletionNotificationWorker] User ${userId} has no pushToken. Skipping.`);
+      if (!user?.pushTokens || user.pushTokens.length === 0) {
+        console.log(`[AiCompletionNotificationWorker] User ${userId} has no pushTokens. Skipping.`);
         return;
       }
 
-      console.log(`[AiCompletionNotificationWorker] Found pushToken for user ${userId}. Sending notification...`);
+      console.log(`[AiCompletionNotificationWorker] Found pushTokens for user ${userId}. Sending notification...`);
       const payload = buildNotificationPayload({ session, event });
 
       const result = await NotificationService.sendCustomNotification(
-        user.pushToken,
+        user.pushTokens,
         payload.title,
         payload.body,
         payload.data

@@ -4,9 +4,9 @@ import { getFirebaseAdmin } from '../../../shared/firebaseAdmin.js';
 import User from '../../../models/User.js';
 
 export class NotificationService {
-  static async sendCustomNotification(token, title, body, data = {}) {
-    if (!token) {
-      throw new Error('FCM token is required');
+  static async sendCustomNotification(tokens, title, body, data = {}) {
+    if (!tokens || tokens.length === 0) {
+      throw new Error('At least one FCM token is required');
     }
 
     const admin = getFirebaseAdmin();
@@ -19,7 +19,7 @@ export class NotificationService {
         ),
         timestamp: Date.now().toString()
       },
-      token,
+      tokens: Array.isArray(tokens) ? tokens : [tokens],
       webpush: {
         fcmOptions: {
           link: data.link || '/dashboard'
@@ -28,20 +28,39 @@ export class NotificationService {
     };
 
     try {
-      return await admin.messaging().send(message);
-    } catch (error) {
-      if (error.code === 'messaging/registration-token-not-registered') {
-        try {
-          await connectMongo();
-          await User.updateMany(
-            { pushToken: token },
-            { $unset: { pushToken: '' } }
-          );
-        } catch (cleanupError) {
-          console.error('Failed to clean up invalid FCM token:', cleanupError);
+      const response = await admin.messaging().sendEachForMulticast(message);
+      
+      // Handle invalid tokens to clean up database
+      if (response.failureCount > 0) {
+        const failedTokens = [];
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            const errCode = resp.error?.code;
+            if (
+              errCode === 'messaging/invalid-registration-token' ||
+              errCode === 'messaging/registration-token-not-registered'
+            ) {
+              failedTokens.push(message.tokens[idx]);
+            }
+          }
+        });
+
+        if (failedTokens.length > 0) {
+          try {
+            await connectMongo();
+            await User.updateMany(
+              { pushTokens: { $in: failedTokens } },
+              { $pullAll: { pushTokens: failedTokens } }
+            );
+          } catch (cleanupError) {
+            console.error('Failed to clean up invalid FCM tokens:', cleanupError);
+          }
         }
       }
 
+      return response;
+    } catch (error) {
+      console.error('Multicast error:', error);
       throw error;
     }
   }

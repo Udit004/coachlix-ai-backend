@@ -112,11 +112,11 @@ async function updateRecentActivity(userId, activity) {
 
 async function sendPlanNotification(userId, title, body, data = {}) {
   const user = await User.findOne({ firebaseUid: userId });
-  if (!user?.pushToken) {
+  if (!user?.pushTokens || user.pushTokens.length === 0) {
     return false;
   }
 
-  NotificationService.sendCustomNotification(user.pushToken, title, body, data).catch((error) => {
+  NotificationService.sendCustomNotification(user.pushTokens, title, body, data).catch((error) => {
     console.error('Diet notification failed:', error);
   });
 
