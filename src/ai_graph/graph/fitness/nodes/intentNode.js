@@ -9,11 +9,11 @@ import {
   logSearchUsage,
 } from "../../../config/searchGrounding.js";
 
-const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are an AI fitness assistant.
+const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are an AI fitness assistant. You classify the user's latest message into an intent. The user may write in ANY language (e.g. Hindi, Hinglish, Spanish, Tamil, French) and in ANY wording — classify by MEANING, never by keyword lists or literal phrasing.
 
 You will be given a conversation history followed by the user's latest message.
 
-Step 1: Decide if the latest message is a CONTINUATION of the conversation (e.g. "yes", "sure", "ok", "go ahead", "no", "fine", "let's do it", a short answer to a question the assistant asked, or a follow-up). Classify into:
+Step 1: Classify the latest message into exactly one of:
 - GREETING
 - GENERAL_QUERY
 - PERSONALIZED_QUERY
@@ -28,7 +28,9 @@ Step 2:
 ---
 
 RULES:
-- If the latest message is a short reply/continuation ("yes", "sure", "ok", "go ahead", "no", "that's fine", "start", "let's begin", etc.) that answers the assistant's previous question, DO NOT treat it as a GREETING. Instead classify it as PERSONALIZED_QUERY (needs_rag = true) if it is agreeing to personalized actions (plans, metrics, coaching), or GENERAL_QUERY if it is a simple confirmation.
+- MEMORY RECALL (IMPORTANT): If the latest message asks about a PAST or RECENT conversation — e.g. "what were we talking about", "what did we discuss recently", "what we are discussing recently", "remind me what we talked about last time", "what have we done so far", "recall our last chat", "what is the last thing we discussed" — classify it as PERSONALIZED_QUERY with needs_rag = true. Answering it REQUIRES loading conversation history and long-term memory, so the general path MUST NOT be used. This applies even if the message is phrased casually or in another language.
+- The latest message may reference something from the conversation history (e.g. "that plan", "my routine", "continue", "about that"). Use the provided history to decide: if it continues a personalized action, mark PERSONALIZED_QUERY.
+- If the latest message is a short reply/continuation ("yes", "sure", "ok", "go ahead", "no", "that's fine", "start", "let's begin", etc.) that answers the assistant's previous question, DO NOT treat it as a GREETING. Classify it as PERSONALIZED_QUERY (needs_rag = true) if it agrees to personalized actions (plans, metrics, coaching), or GENERAL_QUERY if it is a simple confirmation.
 - If unsure -> GENERAL_QUERY
 - OFF_TOPIC includes anything NOT related to fitness, health, nutrition, workout, or the Coachlix platform. Examples: coding, python, history, politics, general math (unless fitness related), etc.
 - Do NOT hallucinate user data
@@ -168,9 +170,11 @@ function formatHistoryForClassifier(conversationHistory) {
     return "";
   }
 
-  // Take the last 4 turns (2 user + 2 ai) to keep tokens low while giving
-  // enough context to resolve short follow-up replies like "yes" / "sure".
-  const recent = conversationHistory.slice(-4);
+  // Take the last 6 turns (3 user + 3 ai) to give the classifier enough
+  // context to resolve memory-recall queries ("what we discussed recently")
+  // and short follow-up replies like "yes" / "sure". Each message is capped
+  // to keep tokens low.
+  const recent = conversationHistory.slice(-6);
   return recent
     .map((msg) => {
       const role = msg.role === "user" ? "User" : "Assistant";
@@ -185,7 +189,7 @@ async function classifyWithSmallLlm(originalMessage, conversationHistory = []) {
     model:
       process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
       process.env.GENERAL_QUERY_MODEL?.trim() ||
-      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
     temperature: 0,
     maxOutputTokens: 200,
     topP: 0.1,
@@ -280,7 +284,7 @@ const emitEvent = (state, type, payload) => {
 //     discuss / what we have talked about / tell me what we worked on)
 //   - temporal marker + memory noun (recent/previous/past ... conversation)
 const RECALL_QUERY_PATTERN =
-  /\b(recall|remember)\b|\b(what|tell|show|summarize)\b.*\b(we|you|our)\b.*\b(done|do|discuss(?:ed)?|talk(?:ed)?|chat(?:ted)?|work(?:ed)?|cover(?:ed)?|been|said|spoke)\b|\b(recent|previous|past|earlier|before)\b.*\b(conversation|chat|memory|discussion|talk|history)\b/i;
+  /\b(recall|remember)\b|\b(what|tell|show|summarize)\b.*\b(we|you|our)\b.*\b(done|do|doing|discuss(?:ed|ing)?|talk(?:ed|ing)?|chat(?:ted|ting)?|work(?:ed|ing)?|cover(?:ed|ing)?|been|said|spoke|speaking|talking|going|having|had)\b|\b(recent|previous|past|earlier|before|lately|last)\b.*\b(conversation|chat|memory|discussion|talk|history|time|session|topic|thing|things)\b/i;
 
 // Short affirmation / follow-up replies that usually continue a prior
 // assistant offer (e.g. "Would you like me to build your plan?" -> "yes").
@@ -520,7 +524,13 @@ let classifierResult;
     classifierResult = FALLBACK_RESULT;
   }
 
-  const forcedPersonalized = shouldForcePersonalizedQuery(originalMessage);
+  // Post-LLM safety overrides:
+  //  1. Personalized plans/metrics phrasing ("show my plan") -> personalized.
+  //  2. Memory-recall phrasing ("what did we discuss recently") -> personalized
+  //     so history + long-term memory are loaded. The LLM classifier should
+  //     catch these, but this regex is a safety net for any missed phrasing.
+  const forcedPersonalized =
+    shouldForcePersonalizedQuery(originalMessage) || RECALL_QUERY_PATTERN.test(trimmed);
   if (forcedPersonalized && classifierResult.intent !== "PERSONALIZED_QUERY") {
     classifierResult = {
       ...classifierResult,
