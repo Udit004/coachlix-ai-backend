@@ -127,21 +127,17 @@ export const chatService = {
       await memoryService.persistTurn(userId, sessionId, 'ai', assistantResponse);
     }
 
-    // Emit a turn completion event so the async memory promotion + summarization
-    // workers can run OFF the hot request path.
-    await emitAiEvent('turn.persisted', {
+    // Emit a SINGLE turn-completion event so the async memory promotion +
+    // summarization workers run OFF the hot request path. The workers use a
+    // per-session turn lock (SET NX) so at most ONE memory LLM call happens
+    // per session per gap window (they are mutually exclusive).
+    await emitAiEvent('turn.completed', {
       userId,
       sessionId,
       plan,
       messageCount: conversationHistory.length + 2,
       responseLength: assistantResponse.length,
-    });
-
-    await emitAiEvent('ai.response.generated', {
-      userId,
-      sessionId,
       intent: result.metadata?.intent || null,
-      responseLength: assistantResponse.length,
       toolsUsed: result.metadata?.toolsUsed || [],
     });
 

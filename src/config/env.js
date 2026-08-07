@@ -37,12 +37,22 @@ pineconeEmbeddingModel: process.env.PINECONE_EMBEDDING_MODEL || 'gemini-embeddin
   pineconeEmbeddingDimension: toNumber(process.env.PINECONE_EMBEDDING_DIMENSION, 1024),
   memoryVectorTopK: toNumber(process.env.MEMORY_VECTOR_TOP_K, 5),
   memoryPromotionThreshold: toNumber(process.env.MEMORY_PROMOTION_THRESHOLD, 2),
-  memorySummaryThreshold: toNumber(process.env.MEMORY_SUMMARY_THRESHOLD, 4),
+  memorySummaryThreshold: toNumber(process.env.MEMORY_SUMMARY_THRESHOLD, 8),
 memoryProfileTtlSeconds: toNumber(process.env.MEMORY_PROFILE_TTL_SECONDS, 60 * 60),
   memoryHotCacheTtlSeconds: toNumber(process.env.MEMORY_HOT_CACHE_TTL_SECONDS, 60 * 30),
   geminiSummarizerModel: process.env.GEMINI_SUMMARIZER_MODEL || 'gemini-2.5-flash',
 memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
   memoryLlmMaxPerMinute: toNumber(process.env.MEMORY_LLM_MAX_PER_MINUTE, 10),
+  // Minimum gap (seconds) between memory LLM runs for the SAME session. The
+  // turn lock expires after this window, so at most ONE memory LLM call can
+  // happen per session per gap window (never after every message).
+  memoryTurnGapSeconds: toNumber(process.env.MEMORY_TURN_GAP_SECONDS, 120),
+  // Per-user per-minute cap on memory LLM calls so a chatty user cannot
+  // exhaust the shared global pool.
+  memoryLlmMaxPerUserPerMinute: toNumber(
+    process.env.MEMORY_LLM_MAX_PER_USER_PER_MINUTE,
+    3
+  ),
 
   // ── Goal-Based Agent (Redis caching) ───────────────────────────────────
   // TTL for the cached active goal per user. Goals change rarely, so a 1h
@@ -66,6 +76,10 @@ memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
   firebaseAdminCredentialsBase64:
     process.env.FIREBASE_ADMIN_CREDENTIALS_BASE64 || '',
   firebaseAdminCredentials: process.env.FIREBASE_ADMIN_CREDENTIALS || '',
+  aiCompletionPushNotificationsEnabled: toBoolean(
+    process.env.AI_COMPLETION_PUSH_NOTIFICATIONS_ENABLED,
+    true
+  ),
   cloudName: process.env.CLOUD_NAME || '',
   cloudApiKey: process.env.CLOUD_API_KEY || '',
   cloudApiSecret: process.env.CLOUD_API_SECRET || '',

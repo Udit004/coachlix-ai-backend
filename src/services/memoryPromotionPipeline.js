@@ -22,6 +22,8 @@ import {
 } from './longTermMemoryService.js';
 import {
   canSpendMemoryLlmBudget,
+  canSpendMemoryLlmBudgetForUser,
+  acquireTurnLock,
   markMemoryRun,
   isWithinCooldown,
   isMemoryWorthy,
@@ -269,7 +271,23 @@ export function registerMemoryPromotionPipeline() {
 
   const handler = async (event) => {
     if (!event?.payload?.sessionId) return;
+    const { sessionId, userId } = event.payload;
+
     try {
+      // Mutually-exclusive per-session turn lock (SET NX): only ONE memory
+      // worker (promotion OR summarization) can run per session per gap
+      // window, so at most ONE memory LLM call happens per turn.
+      if (!(await acquireTurnLock(sessionId))) {
+        console.log('[MemoryPipeline] Turn lock held - skipping promotion');
+        return;
+      }
+
+      // Per-user per-minute budget so a chatty user cannot exhaust the pool.
+      if (!(await canSpendMemoryLlmBudgetForUser(userId))) {
+        console.log('[MemoryPipeline] Per-user budget exceeded - skipping promotion');
+        return;
+      }
+
       await connectMongo();
       const session = await ChatSession.findById(event.payload.sessionId).lean();
       if (session) {
@@ -280,11 +298,10 @@ export function registerMemoryPromotionPipeline() {
     }
   };
 
-  // Listen on the specific event types only. emitAiEvent now delivers typed
-  // events directly on the local emitter, so we avoid the generic 'event'
-  // catch-all (which would double-fire now that local delivery is guaranteed).
-  bus.on('turn.persisted', handler);
-  bus.on('ai.response.generated', handler);
+  // Listen ONLY on the single turn-completion event. The turn lock guarantees
+  // mutually-exclusive workers and at most ONE memory LLM call per session per
+  // gap window (never after every message).
+  bus.on('turn.completed', handler);
 
   return handler;
 }

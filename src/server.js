@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { connectMongo, disconnectMongo } from './db/mongo.js';
 import { setupAIModule } from './services/aiIntegration.js';
 import { initializeEventBus, closeEventBus } from './services/eventBus.js';
+import { registerAiCompletionNotificationWorker } from './services/aiCompletionNotificationWorker.js';
 import { registerMemoryPromotionPipeline } from './services/memoryPromotionPipeline.js';
 import { registerSummarizeWorker } from './services/summarizeWorker.js';
 import { registerGoalScheduler } from './services/goalScheduler.js';
@@ -19,7 +20,8 @@ const start = async () => {
     registerMemoryPromotionPipeline();
     registerSummarizeWorker();
     registerGoalScheduler();
-    fastify.log.info('Background workers registered (promotion + summarizer + goal scheduler)');
+    registerAiCompletionNotificationWorker();
+    fastify.log.info('Background workers registered (promotion + summarizer + goal scheduler + ai completion notifications)');
 
     await fastify.listen({
       host: env.host,

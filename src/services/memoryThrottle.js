@@ -14,6 +14,8 @@ import { cache } from '../lib/redis.js';
 
 const LAST_RUN_KEY = (kind, sessionId) => `memory:lastrun:${kind}:${sessionId}`;
 const GLOBAL_BUCKET_KEY = 'memory:llm:global';
+const USER_BUCKET_KEY = (userId) => `memory:llm:user:${userId}`;
+const TURN_LOCK_KEY = (sessionId) => `memory:turnlock:${sessionId}`;
 const GLOBAL_LIMIT = env.memoryLlmMaxPerMinute;
 const GLOBAL_WINDOW_MS = 60 * 1000;
 
@@ -103,6 +105,48 @@ export async function isWithinCooldown(kind, sessionId) {
     return Date.now() - last < env.memoryCooldownSeconds * 1000;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Atomically acquire the per-session turn lock (SET NX). Only ONE memory
+ * worker (promotion OR summarization) can hold the lock for a session, so at
+ * most ONE memory LLM call runs per session per gap window. The lock TTL is
+ * the memoryTurnGapSeconds window.
+ */
+export async function acquireTurnLock(sessionId, ttlSeconds = env.memoryTurnGapSeconds) {
+  if (!sessionId) return false;
+  try {
+    const key = TURN_LOCK_KEY(sessionId);
+    const acquired = await cache.setIfAbsent(key, Date.now(), ttlSeconds);
+    return Boolean(acquired);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Per-user per-minute memory LLM budget. Mirrors the global budget but scoped
+ * to a single user so one chatty user cannot exhaust the shared pool.
+ */
+export async function canSpendMemoryLlmBudgetForUser(userId) {
+  if (!userId) return true;
+
+  const limit = env.memoryLlmMaxPerUserPerMinute;
+  const windowSeconds = 60;
+
+  try {
+    const key = USER_BUCKET_KEY(userId);
+    const current = Number((await cache.get(key)) || 0);
+    if (current >= limit) {
+      return false;
+    }
+    await cache.set(key, current + 1, windowSeconds);
+    return true;
+  } catch {
+    // If Redis is unavailable, fall back to allowing (the global budget and
+    // the per-session turn lock still guard against runaway calls).
+    return true;
   }
 }
 
@@ -222,9 +266,11 @@ export function heuristicExtractFacts(messages = []) {
 
 export default {
   canSpendMemoryLlmBudget,
+  canSpendMemoryLlmBudgetForUser,
+  acquireTurnLock,
   markMemoryRun,
   isWithinCooldown,
   isMemoryWorthy,
   heuristicExtractFacts,
-resetMemoryThrottle,
+  resetMemoryThrottle,
 };
