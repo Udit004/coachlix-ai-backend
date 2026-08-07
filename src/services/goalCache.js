@@ -16,6 +16,7 @@ import { env } from '../config/env.js';
 
 const activeKey = (userId) => `goal:active:${userId}`;
 const draftKey = (userId) => `goal:draft:${userId}`;
+const turnKey = (userId) => `goal:turn:${userId}`;
 
 /**
  * Whether we have a usable Redis client. If not, every cache op is a Noop so
@@ -132,6 +133,62 @@ export async function clearGoalDraft(userId) {
   }
 }
 
+// ── Per-turn agent plan (goal-based planner pause/resume) ────────────────
+
+/**
+ * Read the in-flight turn plan for a user. Returns the parsed plan or null.
+ * Used to RESUME a goal-oriented exchange without re-planning (cost saver).
+ */
+export async function getTurnPlan(userId) {
+  if (!userId || !isGoalCacheEnabled()) return null;
+  try {
+    const raw = await redis.get(turnKey(userId));
+    if (!raw) return null;
+    return typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch (error) {
+    console.warn('[GoalCache] getTurnPlan failed:', error?.message || error);
+    return null;
+  }
+}
+
+/**
+ * Persist the in-flight turn plan so an awaiting-input exchange can be
+ * resumed later, or an active plan survives across the tool loop.
+ */
+export async function setTurnPlan(userId, plan) {
+  if (!userId || !isGoalCacheEnabled()) return false;
+  try {
+    if (!plan) {
+      await redis.del(turnKey(userId));
+      return true;
+    }
+    await redis.set(
+      turnKey(userId),
+      JSON.stringify(plan),
+      'EX',
+      env.turnPlanTtlSeconds
+    );
+    return true;
+  } catch (error) {
+    console.warn('[GoalCache] setTurnPlan failed:', error?.message || error);
+    return false;
+  }
+}
+
+/**
+ * Clear the in-flight turn plan (called once it completes or is abandoned).
+ */
+export async function clearTurnPlan(userId) {
+  if (!userId || !isGoalCacheEnabled()) return false;
+  try {
+    await redis.del(turnKey(userId));
+    return true;
+  } catch (error) {
+    console.warn('[GoalCache] clearTurnPlan failed:', error?.message || error);
+    return false;
+  }
+}
+
 export default {
   isGoalCacheEnabled,
   getCachedActiveGoal,
@@ -140,4 +197,7 @@ export default {
   getGoalDraft,
   setGoalDraft,
   clearGoalDraft,
+  getTurnPlan,
+  setTurnPlan,
+  clearTurnPlan,
 };

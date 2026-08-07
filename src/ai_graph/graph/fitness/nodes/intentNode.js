@@ -189,7 +189,7 @@ async function classifyWithSmallLlm(originalMessage, conversationHistory = []) {
     model:
       process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
       process.env.GENERAL_QUERY_MODEL?.trim() ||
-      "gemini-2.5-flash-lite",
+      "gemini-2.5-flash",
     temperature: 0,
     maxOutputTokens: 200,
     topP: 0.1,

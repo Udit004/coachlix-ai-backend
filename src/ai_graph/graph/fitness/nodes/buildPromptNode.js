@@ -63,6 +63,52 @@ function buildGoalResponseInstruction(goalAction, activeGoal) {
   return "";
 }
 
+// Format the per-turn agent plan (goal + task breakdown + next action) into a
+// compact prompt section so the assistant drives a structured, goal-oriented
+// turn. Also handles pause/resume: if we are awaiting input, the assistant
+// asks the single pending question rather than barreling ahead.
+function buildTurnPlanInstruction(turnPlan) {
+  if (!turnPlan?.goal && !turnPlan?.pendingQuestion) return "";
+
+  const lines = ["=== TURN PLAN ==="];
+  if (turnPlan.goal) lines.push(`Immediate goal: ${turnPlan.goal}`);
+
+  const breakdown = Array.isArray(turnPlan.taskBreakdown)
+    ? turnPlan.taskBreakdown
+    : [];
+  if (breakdown.length > 0) {
+    lines.push("Plan to solve this request:");
+    breakdown.forEach((step, i) => {
+      lines.push(`  ${i + 1}. ${step.title || step.action || "Step"}`);
+    });
+  }
+
+  // Pause / resume: we are waiting for one piece of info.
+  if (turnPlan.status === "awaiting_input" || turnPlan.pendingQuestion) {
+    lines.push("");
+    lines.push("You are waiting for input from the user to continue this plan.");
+    lines.push(`Ask ONLY this question: ${turnPlan.pendingQuestion || "Please provide the missing detail."}`);
+    lines.push("Do not produce the full deliverable until the user answers.");
+    return lines.join("\n");
+  }
+
+  if (turnPlan.nextAction) {
+    lines.push("");
+    lines.push(`Next action: ${turnPlan.nextAction}`);
+  }
+
+  if (turnPlan.suggestCreateGoal) {
+    lines.push("");
+    lines.push(
+      "This request implies a longer-term goal. After helping with the immediate " +
+        "request, briefly offer to create a persistent goal (e.g. 'Would you like me " +
+        "to set this up as your ongoing goal?')."
+    );
+  }
+
+  return lines.join("\n");
+}
+
 export async function buildPromptNode(state) {
   const {
     originalMessage,
@@ -98,7 +144,8 @@ const { systemPrompt, promptTier } = selectPrompt({
     ? formatGoalForContext(state.activeGoal)
     : promptUserContext?.goalContext || "";
   const goalInstruction = buildGoalResponseInstruction(state.goalAction, state.activeGoal);
-  const finalSystemPrompt = [systemPrompt, goalContext, goalInstruction]
+  const turnPlanInstruction = buildTurnPlanInstruction(state.turnPlan);
+  const finalSystemPrompt = [systemPrompt, goalContext, goalInstruction, turnPlanInstruction]
     .filter(Boolean)
     .join("\n\n");
 

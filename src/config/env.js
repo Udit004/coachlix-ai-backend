@@ -52,10 +52,13 @@ memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
     process.env.GOAL_ACTIVE_CACHE_TTL_SECONDS,
     60 * 60
   ),
-  // TTL for a "draft" goal that is awaiting clarification from the user.
+// TTL for a "draft" goal that is awaiting clarification from the user.
   // After this window the draft expires so a stale partial goal is not
   // resumed later.
   goalDraftTtlSeconds: toNumber(process.env.GOAL_DRAFT_TTL_SECONDS, 60 * 30),
+  // TTL for the per-turn agent plan (goal-based planner pause/resume). Kept
+  // short so an in-flight plan does not linger after the exchange ends.
+  turnPlanTtlSeconds: toNumber(process.env.TURN_PLAN_TTL_SECONDS, 60 * 20),
 
   firebaseAdminProjectId: process.env.FIREBASE_ADMIN_PROJECT_ID || '',
   firebaseAdminPrivateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY || '',

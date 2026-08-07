@@ -48,11 +48,16 @@ toolsUsed: Annotation({ reducer: appendArray, default: () => [] }),
   startTime: Annotation({ reducer: lastWrite, default: () => 0 }),
   flowMetrics: Annotation({ reducer: mergeObjects, default: () => ({}) }),
 
-  // Goal-based agent state: the user's active goal, loaded during context
+// Goal-based agent state: the user's active goal, loaded during context
   // retrieval and injected into the prompt so the assistant reasons in the
   // context of the user's objective rather than in a vacuum.
   activeGoal: Annotation({ reducer: lastWrite, default: () => null }),
   goalAction: Annotation({ reducer: lastWrite, default: () => null }),
+
+  // Per-turn agent plan (goal + task breakdown + next action) computed by the
+  // cost-efficient turn planner. Injected into the prompt so the LLM drives a
+  // structured, goal-oriented conversation and supports pause/resume.
+  turnPlan: Annotation({ reducer: lastWrite, default: () => null }),
 
   // Callback used by graph nodes to push AI lifecycle events to the
   // request caller (e.g. forwarded to the frontend via SSE).

@@ -183,6 +183,52 @@ export async function createGoal(userId, input = {}) {
 }
 
 /**
+ * Create a durable goal directly from a per-turn agent plan. Used when the
+ * assistant and user agree to persist an in-progress conversation goal (e.g.
+ * "build my plan") without forcing the user to re-state all details. The goal
+ * type and an initial plan are derived from the turn plan's task breakdown.
+ */
+export async function createGoalFromTurnPlan(userId, turnPlan = {}, extra = {}) {
+  if (!userId) throw new Error('userId is required to create a goal from a turn plan');
+  if (!turnPlan?.goal && !extra.title) {
+    throw new Error('A turn-plan goal or title is required');
+  }
+
+  const breakdown = Array.isArray(turnPlan.taskBreakdown) ? turnPlan.taskBreakdown : [];
+  const type = ['weight_loss', 'muscle_gain', 'endurance', 'nutrition', 'general'].includes(
+    String(turnPlan.goalType || extra.type || '').toLowerCase()
+  )
+    ? String(turnPlan.goalType || extra.type).toLowerCase()
+    : 'general';
+
+  const plan = breakdown.length
+    ? breakdown.map((step) => ({
+        title: String(step.title || step.action || 'Step'),
+        action: String(step.action || step.title || ''),
+        tool: String(step.tool || 'general').slice(0, 30),
+        status: 'pending',
+      }))
+    : [];
+
+  const input = {
+    title: extra.title || String(turnPlan.goal || '').trim(),
+    description: String(extra.description || '').trim() || undefined,
+    type,
+    plan,
+    target: {
+      currentValue: extra.currentValue ?? null,
+      targetValue: extra.targetValue ?? null,
+      startValue: extra.currentValue ?? null,
+      unit: extra.unit || 'kg',
+    },
+    source: 'turn_plan',
+    checkInFrequency: extra.checkInFrequency || 'weekly',
+  };
+
+  return createGoal(userId, input);
+}
+
+/**
  * Update a goal's measurable progress. Recomputes percent and detects if the
  * goal just completed or if progress has stalled.
  */
@@ -429,6 +475,7 @@ export function formatGoalForContext(goal) {
 
 export default {
   createGoal,
+  createGoalFromTurnPlan,
   updateGoalProgress,
   updateGoalStep,
   getActiveGoal,

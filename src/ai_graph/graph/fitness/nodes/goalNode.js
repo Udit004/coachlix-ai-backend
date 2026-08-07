@@ -12,6 +12,7 @@ import {
   formatGoalForContext,
 } from "../../../../services/goalService.js";
 import goalCache from "../../../../services/goalCache.js";
+import { inferTurnGoal } from "../../../../services/turnPlanner.js";
 
 const emitEvent = (state, type, payload) => {
   if (typeof state?.onEvent === "function") {
@@ -342,12 +343,53 @@ export async function goalNode(state) {
     }
   }
 
+  // ── Goal-based turn planner (agentic) ──────────────────────────────────
+  // Runs on every personalized turn (cheap tiered planner). Computes an
+  // immediate goal + task breakdown + next action so the assistant drives a
+  // structured, goal-oriented conversation. Supports pause/resume by caching
+  // the plan and reusing it on short follow-up answers (no extra LLM call).
+  let turnPlan = null;
+  try {
+    const cachedPlan = await goalCache.getTurnPlan(userId);
+
+    turnPlan = await inferTurnGoal({
+      userId,
+      message: originalMessage,
+      activeGoal: activeGoal || null,
+      profile: profile || null,
+      cachedPlan: cachedPlan || null,
+    });
+
+    // Persist the plan so a later short answer can resume it without a new
+    // planner call. Clear it once the plan is fulfilled (no pending question).
+    if (turnPlan?.status === "awaiting_input" || turnPlan?.pendingQuestion) {
+      await goalCache.setTurnPlan(userId, turnPlan);
+    } else if (cachedPlan || turnPlan) {
+      await goalCache.setTurnPlan(userId, turnPlan);
+    }
+
+    emitEvent(state, "goal.intent.plan", {
+      userId,
+      goal: turnPlan.goal || null,
+      taskCount: Array.isArray(turnPlan.taskBreakdown)
+        ? turnPlan.taskBreakdown.length
+        : 0,
+      nextAction: turnPlan.nextAction || null,
+      tier: turnPlan.tier || "none",
+      resumesCached: Boolean(turnPlan.resumed),
+      awaitingInput: turnPlan.status === "awaiting_input",
+    });
+  } catch (error) {
+    console.error("[Graph:goal] Turn planner failed:", error?.message || error);
+  }
+
   const elapsed = Date.now() - t0;
 
   emitEvent(state, "ai.context.resolved", {
     userId,
     hasGoal: Boolean(activeGoal),
     goalAction: goalAction?.kind || null,
+    turnPlan: Boolean(turnPlan),
     durationMs: elapsed,
   });
 
@@ -361,11 +403,13 @@ export async function goalNode(state) {
         ? buildDraftGoalContext(goalAction.draft)
         : buildGoalActionContext(activeGoal, goalAction),
     goalAction,
+    turnPlan,
   };
 
   return {
     activeGoal,
     goalAction,
+    turnPlan,
     userContext: enrichedContext,
     flowMetrics: { goalRetrievalTime: elapsed },
   };
