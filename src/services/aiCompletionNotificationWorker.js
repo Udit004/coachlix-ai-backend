@@ -72,10 +72,12 @@ export function registerAiCompletionNotificationWorker() {
     }
 
     if (!claimEvent(event)) {
+      console.log(`[AiCompletionNotificationWorker] Event ${sessionId} already claimed or invalid. UserId: ${userId}`);
       return;
     }
 
     try {
+      console.log(`[AiCompletionNotificationWorker] Processing turn.completed for user ${userId}, session ${sessionId}`);
       await connectMongo();
 
       const [user, session] = await Promise.all([
@@ -84,17 +86,20 @@ export function registerAiCompletionNotificationWorker() {
       ]);
 
       if (!user?.pushToken) {
+        console.log(`[AiCompletionNotificationWorker] User ${userId} has no pushToken. Skipping.`);
         return;
       }
 
+      console.log(`[AiCompletionNotificationWorker] Found pushToken for user ${userId}. Sending notification...`);
       const payload = buildNotificationPayload({ session, event });
 
-      await NotificationService.sendCustomNotification(
+      const result = await NotificationService.sendCustomNotification(
         user.pushToken,
         payload.title,
         payload.body,
         payload.data
       );
+      console.log(`[AiCompletionNotificationWorker] Successfully sent push notification to ${userId}:`, result);
     } catch (error) {
       console.error('[AiCompletionNotificationWorker] Failed to send push notification:', error.message);
     }

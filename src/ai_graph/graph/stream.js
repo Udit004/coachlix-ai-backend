@@ -144,7 +144,7 @@ export async function processChatWithGraph(params, onChunk, onEvent) {
       if (!output) continue;
 
       if (
-        metadata?.langgraph_node === "greeting" &&
+        (metadata?.langgraph_node === "greeting" || metadata?.langgraph_node === "directGeneral") &&
         !fullResponse &&
         Array.isArray(output.messages) &&
         output.messages.length > 0
