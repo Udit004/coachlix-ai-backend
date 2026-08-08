@@ -7,6 +7,7 @@ import { registerAiCompletionNotificationWorker } from './services/aiCompletionN
 import { registerMemoryPromotionPipeline } from './services/memoryPromotionPipeline.js';
 import { registerSummarizeWorker } from './services/summarizeWorker.js';
 import { registerGoalScheduler } from './services/goalScheduler.js';
+import { attachChatWebSocketServer } from './sockets/chatWsServer.js';
 
 const start = async () => {
   const fastify = await buildServer();
@@ -31,6 +32,11 @@ const start = async () => {
     fastify.log.info(
       `Coachlix backend is running at http://${env.host}:${env.port}`
     );
+
+    // Attach the standalone `ws`-based /ws/chat server AFTER listen so
+    // `fastify.server` (the live HTTP server) is available for the upgrade
+    // handler. This is the robust, proxy-friendly path for token streaming.
+    attachChatWebSocketServer(fastify);
 
     const shutdown = async (signal) => {
       fastify.log.info({ signal }, 'Graceful shutdown started');
