@@ -4,8 +4,13 @@ import mongoose from 'mongoose';
 
 import { GeminiLiveBridge } from '../ai/geminiLiveBridge.js';
 import { env } from '../config/env.js';
+import { verifyUserToken } from '../shared/auth.js';
+import { chatService } from '../module/chat/chatService.js';
 import ChatSession from '../models/ChatSession.js';
 import User from '../models/User.js';
+
+// Persistent chat WebSocket heartbeat — under Render's ~55-100s idle timeout.
+const CHAT_HEARTBEAT_MS = 25_000;
 
 const clients = new Map();
 
@@ -491,6 +496,148 @@ export async function socketRoutes(fastify) {
       { clientId, ip: request.ip, totalClients: clients.size },
       'Live WebSocket client connected'
     );
+  });
+
+// ── Persistent text-chat WebSocket ──────────────────────────────────────
+  // Connects once per chat UI session (auth at handshake), reuses the socket
+  // for every message, and streams tokens/AI-events over WS to avoid SSE
+  // HTTP-intermediary buffering on Render.
+  fastify.get('/ws/chat', { websocket: true }, (socket, request) => {
+    let heartbeat = null;
+    let alive = true;
+    let inFlight = false;
+    let user = null;
+
+    const cleanup = () => {
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      inFlight = false;
+    };
+
+    const send = (payload) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        try {
+          socket.send(JSON.stringify(payload));
+        } catch (_) {
+          // ignore send failures; handled by close/error
+        }
+      }
+    };
+
+    const attachHandlers = () => {
+      // Heartbeat: under Render's idle-connection timeout. Pings are cheap and
+      // also complement the uptime monitor (an open socket = an alive user).
+      heartbeat = setInterval(() => {
+        if (!alive) {
+          cleanup();
+          return socket.terminate();
+        }
+        alive = false;
+        try {
+          socket.ping();
+        } catch (_) {
+          cleanup();
+          socket.terminate();
+        }
+      }, CHAT_HEARTBEAT_MS);
+      socket.on('pong', () => {
+        alive = true;
+      });
+
+      socket.on('message', async (rawData) => {
+        let data;
+        try {
+          data = JSON.parse(String(rawData));
+        } catch (_) {
+          send({ type: 'error', message: 'Invalid JSON payload' });
+          return;
+        }
+
+        if (data.type === 'ping') {
+          alive = true;
+          send({ type: 'pong', ts: Date.now() });
+          return;
+        }
+
+        if (data.type !== 'chat.message') {
+          return;
+        }
+
+        if (inFlight) {
+          send({ type: 'error', message: 'A message is already streaming. Wait for completion.' });
+          return;
+        }
+
+        const { message, plan, chatId, files } = data || {};
+        if (!message || !String(message).trim()) {
+          send({ type: 'error', message: 'Message is required' });
+          return;
+        }
+
+        inFlight = true;
+        try {
+          const result = await chatService.streamMessage(
+            user.uid,
+            { message, plan, chatId, files },
+            (chunk) => {
+              if (chunk?.type === 'thought_chunk') {
+                send({ type: 'thought_chunk', text: chunk.text });
+                return;
+              }
+              send({
+                type: 'word',
+                word: chunk?.word ?? chunk?.text ?? '',
+                partialResponse: chunk?.partialResponse,
+                isComplete: false,
+              });
+            },
+            (event) => {
+              if (!event?.type) return;
+              const { type: eventType, ...eventFields } = event;
+              send({ type: 'ai_event', event: eventType, ...eventFields });
+            }
+          );
+
+          send({
+            type: 'complete',
+            fullResponse: result.response,
+            suggestions: [],
+            metadata: result.metadata,
+            chatId: result.chatId,
+          });
+        } catch (err) {
+          fastify.log.error({ err, userId: user?.uid }, 'WS chat streaming failed');
+          send({ type: 'error', message: err?.message || 'Unexpected streaming error occurred.' });
+        } finally {
+          inFlight = false;
+        }
+      });
+
+      socket.on('close', cleanup);
+      socket.on('error', cleanup);
+
+      send({ type: 'connected', mode: 'chat', message: 'Chat socket connected' });
+      fastify.log.info({ userId: user.uid, ip: request.ip }, 'Chat WebSocket connected');
+    };
+
+    // Authenticate ONCE at handshake — no per-message auth/DB lookups.
+    const token = String(request.query?.token || '').trim();
+    (async () => {
+      try {
+        user = await verifyUserToken(token);
+      } catch (_) {
+        user = null;
+      }
+
+      if (!user?.uid) {
+        socket.close(4001, 'Unauthorized');
+        return;
+      }
+
+      attachHandlers();
+    })();
   });
 
   fastify.get('/ws/stats', async () => ({
