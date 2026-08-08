@@ -14,7 +14,7 @@ const emitEvent = (state, type, payload) => {
 };
 
 export async function toolsNode(state) {
-  const { messages, userId } = state;
+  const { messages, userId, toolLoopCount = 0 } = state;
   const lastMessage = messages[messages.length - 1];
   const toolCalls = lastMessage?.tool_calls ?? [];
 
@@ -22,6 +22,11 @@ export async function toolsNode(state) {
     console.log("[Graph:tools] No tool calls - skipping");
     return {};
   }
+
+  // Increment the llm->tools->llm cycle counter so the graph can break out
+  // of an infinite tool-calling loop (e.g. a model that keeps requesting
+  // tools without ever producing a final answer).
+  const nextLoopCount = (Number(toolLoopCount) || 0) + 1;
 
   console.log(
     `[Graph:tools] Executing ${toolCalls.length} tool(s) in PARALLEL: ` +
@@ -77,8 +82,9 @@ export async function toolsNode(state) {
     durationMs: elapsed,
   });
 
-  return {
+return {
     messages: toolMessages,
     toolsUsed: toolCalls.map((tc) => tc.name),
+    toolLoopCount: nextLoopCount,
   };
 }

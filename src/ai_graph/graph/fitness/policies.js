@@ -22,7 +22,11 @@ const PERSONAL_TOOLS = [
   "update_workout_plan",
   "calculate_health_metrics",
   "create_diet_plan",
-  "update_diet_plan",
+  "update_diet_targets",
+  "replace_diet_day",
+  "update_diet_meal",
+  "add_diet_food_item",
+  "remove_diet_food_item",
   "fetch_details",
 ];
 

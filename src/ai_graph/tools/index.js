@@ -110,6 +110,11 @@ export const toolRegistry = {
   'calculate_health_metrics': calculateHealthMetrics,
   'create_diet_plan': createDietPlan,
   'update_diet_plan': updateDietPlan,
+  'update_diet_targets': updateDietPlan,
+  'replace_diet_day': updateDietPlan,
+  'update_diet_meal': updateDietPlan,
+  'add_diet_food_item': updateDietPlan,
+  'remove_diet_food_item': updateDietPlan,
   'fetch_details': fetchDetails,
 };
 
@@ -148,16 +153,22 @@ export function getToolDescriptions() {
 4. create_diet_plan - Create new personalized diet plans
    Required args: { userId: string, planName?: string, goal?: string, targetCalories?: number, duration?: number, dietaryRestrictions?: Array }
 
-5. update_diet_plan - Update existing diet plans (NOT for viewing - use fetch_details instead)
-   ALWAYS call fetch_details first for partial updates so you have the current plan state.
-   Required args: { userId: string, planId?: string, planName?: string, action: "update" }
-   Plan-level targets: { targetCalories?, targetProtein?, targetCarbs?, targetFats?, goal? }
-   Replace full day:  { updateDay: { dayNumber, meals: [{type, items:[{name,calories,protein,carbs,fats,quantity?}]}], waterIntake?, notes? } }
-   Patch one meal:    { updateMeal: { dayNumber, mealType: "Breakfast"|"Lunch"|"Dinner"|"Snacks"|"Pre-Workout"|"Post-Workout", items:[{name,calories,protein,carbs,fats,quantity?}] } }
-   Add food item:     { addFoodItem: { dayNumber, mealType, item: {name,calories,protein,carbs,fats,quantity?} } }
-   Remove food item:  { removeFoodItem: { dayNumber, mealType, foodName } }
+5. update_diet_targets - Update daily calorie/macro targets or goal of an existing diet plan
+   Required args: { userId: string, planId?: string, planName?: string, targetCalories?, targetProtein?, targetCarbs?, targetFats?, goal? }
 
-6. fetch_details - Fetch detailed meal or workout information when user needs specifics
+6. replace_diet_day - Replace ALL meals for one specific day of an existing diet plan
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, meals: [{type, items:[{name,calories,protein,carbs,fats,quantity?}]}], waterIntake?, notes? }
+
+7. update_diet_meal - Patch a SINGLE meal type on a specific day (other meals untouched)
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: "Breakfast"|"Lunch"|"Dinner"|"Snacks"|"Pre-Workout"|"Post-Workout", items: [{name,calories,protein,carbs,fats,quantity?}] }
+
+8. add_diet_food_item - Add a single food item to a specific meal on a specific day
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, item: {name,calories,protein,carbs,fats,quantity?} }
+
+9. remove_diet_food_item - Remove a specific food item from a meal on a specific day
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, foodName: string }
+
+10. fetch_details - Fetch detailed meal or workout information when user needs specifics
    Required args: { userId: string, type: "diet"|"workout", detail?: "today"|"full"|"specific_day", dayNumber?: number }
    Use this when user asks: "What should I eat today?", "Show me my full diet plan", "What exercises today?"`;
 }

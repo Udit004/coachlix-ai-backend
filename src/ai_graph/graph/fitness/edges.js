@@ -33,15 +33,32 @@ export function routeAfterClassify(state) {
   return "personalized";
 }
 
+// Maximum number of llm->tools->llm cycles before the graph forces a final
+// answer. This guards against a model (e.g. a free/small model) that keeps
+// requesting tools without ever producing a final text response, which would
+// otherwise loop until LangGraph's recursion limit is hit.
+const MAX_TOOL_LOOPS = Number(process.env.MAX_TOOL_LOOPS || 5);
+
 export function shouldContinueToTools(state) {
   const last = state.messages.at(-1);
   const hasCalls = Array.isArray(last?.tool_calls) && last.tool_calls.length > 0;
 
-  if (hasCalls) {
-    console.log(`[Graph:edge] llm -> tools (${last.tool_calls.length} call(s))`);
-    return "tools";
+  if (!hasCalls) {
+    console.log("[Graph:edge] llm -> END (final response)");
+    return END;
   }
 
-  console.log("[Graph:edge] llm -> END (final response)");
-  return END;
+  const loopCount = Number(state.toolLoopCount) || 0;
+  if (loopCount >= MAX_TOOL_LOOPS) {
+    console.warn(
+      `[Graph:edge] Tool loop limit reached (${loopCount}/${MAX_TOOL_LOOPS}). ` +
+        "Forcing final response to avoid infinite tool-calling recursion."
+    );
+    return END;
+  }
+
+  console.log(
+    `[Graph:edge] llm -> tools (${last.tool_calls.length} call(s), loop ${loopCount}/${MAX_TOOL_LOOPS})`
+  );
+  return "tools";
 }

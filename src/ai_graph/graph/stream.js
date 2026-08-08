@@ -112,10 +112,17 @@ export async function processChatWithGraph(params, onChunk, onEvent) {
   let contextStatsMeta = null;
   let enableSearchMeta = false;
 
-  const graph = getCompiledGraph();
+const graph = getCompiledGraph();
 
   try {
-    const eventStream = graph.streamEvents(initialState, { version: "v2" });
+    // Pass a bounded recursion limit as a safety net. The tool-loop guard in
+    // edges.js/llmNode.js should break the llm->tools->llm cycle well before
+    // this, but a hard cap prevents a runaway agent from ever hitting
+    // LangGraph's default limit unintentionally.
+    const eventStream = graph.streamEvents(initialState, {
+      version: "v2",
+      recursionLimit: Number(process.env.GRAPH_RECURSION_LIMIT || 30),
+    });
 
     for await (const event of eventStream) {
       const { event: eventType, data, metadata } = event;

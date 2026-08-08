@@ -4,7 +4,13 @@ import { createNutritionLookupTool } from "./nutritionLookupTool.js";
 import { createUpdateWorkoutPlanTool } from "./updateWorkoutPlanTool.js";
 import { createCalculateHealthMetricsTool } from "./calculateHealthMetricsTool.js";
 import { createCreateDietPlanTool } from "./createDietPlanTool.js";
-import { createUpdateDietPlanTool } from "./updateDietPlanTool.js";
+import {
+  createUpdateDietTargetsTool,
+  createReplaceDayTool,
+  createUpdateMealTool,
+  createAddFoodItemTool,
+  createRemoveFoodItemTool,
+} from "./updateDietPlanTool.js";
 import { createFetchDetailsTool } from "./fetchDetailsTool.js";
 
 export function createGraphTools(excludedTools = []) {
@@ -13,7 +19,11 @@ export function createGraphTools(excludedTools = []) {
     createUpdateWorkoutPlanTool(),
     createCalculateHealthMetricsTool(),
     createCreateDietPlanTool(),
-    createUpdateDietPlanTool(),
+    createUpdateDietTargetsTool(),
+    createReplaceDayTool(),
+    createUpdateMealTool(),
+    createAddFoodItemTool(),
+    createRemoveFoodItemTool(),
     createFetchDetailsTool(),
   ];
 

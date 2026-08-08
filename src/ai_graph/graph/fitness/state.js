@@ -45,6 +45,11 @@ export const GraphState = Annotation.Root({
   memoryHits: Annotation({ reducer: lastWrite, default: () => [] }),
 
 toolsUsed: Annotation({ reducer: appendArray, default: () => [] }),
+  // Tracks how many llm->tools->llm cycles have run so the graph can break
+  // out of an infinite tool-calling loop (e.g. when a model keeps requesting
+  // tools without producing a final answer). Incremented in toolsNode and
+  // checked in shouldContinueToTools.
+  toolLoopCount: Annotation({ reducer: lastWrite, default: () => 0 }),
   startTime: Annotation({ reducer: lastWrite, default: () => 0 }),
   flowMetrics: Annotation({ reducer: mergeObjects, default: () => ({}) }),
 
