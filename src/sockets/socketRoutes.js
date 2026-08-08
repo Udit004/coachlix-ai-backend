@@ -4,8 +4,13 @@ import mongoose from 'mongoose';
 
 import { GeminiLiveBridge } from '../ai/geminiLiveBridge.js';
 import { env } from '../config/env.js';
+import { verifyUserToken } from '../shared/auth.js';
+import { chatService } from '../module/chat/chatService.js';
 import ChatSession from '../models/ChatSession.js';
 import User from '../models/User.js';
+
+// Persistent chat WebSocket heartbeat — under Render's ~55-100s idle timeout.
+const CHAT_HEARTBEAT_MS = 25_000;
 
 const clients = new Map();
 
@@ -487,7 +492,7 @@ export async function socketRoutes(fastify) {
       fastify.log.error({ err, clientId }, 'WebSocket client error');
     });
 
-    fastify.log.info(
+fastify.log.info(
       { clientId, ip: request.ip, totalClients: clients.size },
       'Live WebSocket client connected'
     );
@@ -496,4 +501,139 @@ export async function socketRoutes(fastify) {
   fastify.get('/ws/stats', async () => ({
     onlineUsers: clients.size
   }));
+
+  // ── Chat WebSocket (text streaming) ─────────────────────────────────────
+  // Uses @fastify/websocket (registered globally in corePlugins.js) so this
+  // route is handled by the SAME upgrade handler as /ws/live — critical to
+  // avoid the 404 that a second standalone `ws` upgrade listener caused.
+  fastify.get('/ws/chat', { websocket: true }, (socket, request) => {
+    const clientId = randomUUID();
+    let userId = null;
+    let inFlight = false;
+
+    const send = (payload) => safeSend(socket, payload);
+
+    const heartbeat = () => {
+      if (socket.isAlive === false) {
+        try {
+          socket.terminate();
+        } catch {
+          // No-op
+        }
+        return;
+      }
+      socket.isAlive = false;
+      try {
+        socket.ping();
+      } catch {
+        // No-op
+      }
+    };
+
+    socket.isAlive = true;
+    const heartbeatTimer = setInterval(heartbeat, CHAT_HEARTBEAT_MS);
+
+    const onPong = () => {
+      socket.isAlive = true;
+    };
+    socket.on('pong', onPong);
+
+    const cleanup = () => {
+      clearInterval(heartbeatTimer);
+      socket.off('pong', onPong);
+    };
+
+    // Authenticate at handshake-time via ?token= query param.
+    const token = request.query?.token || request.query?.Token || '';
+    verifyUserToken(String(token))
+      .then((decoded) => {
+        userId = decoded?.uid || null;
+        if (!userId) {
+          throw new Error('No uid in token');
+        }
+        fastify.log.info({ userId }, 'Chat WebSocket connected');
+        send({ type: 'connected', message: 'Chat WebSocket connected' });
+      })
+      .catch((err) => {
+        fastify.log.warn({ err: err?.message }, 'Chat WS auth failed');
+        send({ type: 'error', message: 'Unauthorized' });
+        cleanup();
+        try {
+          socket.close(4001, 'Unauthorized');
+        } catch {
+          socket.terminate();
+        }
+      });
+
+    socket.on('message', async (rawData) => {
+      if (!userId || inFlight) return;
+
+      let data;
+      try {
+        data = JSON.parse(String(rawData));
+      } catch {
+        send({ type: 'error', message: 'Invalid JSON payload' });
+        return;
+      }
+
+      if (data.type === 'ping') {
+        send({ type: 'pong', ts: Date.now() });
+        return;
+      }
+
+      if (data.type !== 'chat.message') {
+        send({ type: 'error', message: `Unsupported type: ${data.type}` });
+        return;
+      }
+
+      inFlight = true;
+      try {
+        const result = await chatService.streamMessage(
+          userId,
+          {
+            message: data.message,
+            plan: data.plan || 'general',
+            chatId: data.chatId,
+            files: data.files,
+          },
+          async (chunkData) => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            if (chunkData.type === 'thought_chunk') {
+              send({ type: 'thought_chunk', text: chunkData.text });
+              return;
+            }
+            send({
+              type: 'word',
+              word: chunkData.word ?? chunkData.text ?? '',
+              partialResponse: chunkData.partialResponse,
+              isComplete: false,
+            });
+          },
+          async (event) => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            if (!event?.type) return;
+            const { type: eventType, ...eventFields } = event;
+            send({ type: 'ai_event', event: eventType, ...eventFields });
+          }
+        );
+
+        send({
+          type: 'complete',
+          fullResponse: result.response,
+          chatId: result.chatId,
+          metadata: result.metadata,
+        });
+      } catch (err) {
+        fastify.log.error({ err: err?.message, userId }, 'Chat WS stream error');
+        send({ type: 'error', message: err?.message || 'Streaming error' });
+      } finally {
+        inFlight = false;
+      }
+    });
+
+    socket.on('close', cleanup);
+    socket.on('error', (err) => {
+      fastify.log.error({ err: err?.message, clientId }, 'Chat WS client error');
+    });
+  });
 }
