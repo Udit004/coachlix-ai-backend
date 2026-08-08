@@ -74,12 +74,12 @@ async function extractFacts(transcript) {
   if (!transcript?.trim()) return [];
 
   try {
-    const { ChatGoogleGenerativeAI } = await import('@langchain/google-genai');
-    const llm = new ChatGoogleGenerativeAI({
-      apiKey: env.geminiApiKey,
-      model: env.geminiSummarizerModel || 'gemini-2.5-flash',
+    const { ChatGroq } = await import('@langchain/groq');
+    const llm = new ChatGroq({
+      apiKey: env.groqApiKey,
+      model: env.groqIntentModel || 'llama-3.1-8b-instant',
       temperature: 0,
-      maxOutputTokens: 512,
+      maxRetries: 2,
     });
 
     const resp = await llm.invoke([

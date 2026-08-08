@@ -1,4 +1,5 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatGroq } from "@langchain/groq";
 
 /**
  * LLM Configuration for Gemini 2.5 Flash with function calling
@@ -79,5 +80,22 @@ export function createLLMWithSearch(streaming = true, searchConfig = {}) {
         }
       }
     }]
+  });
+}
+
+/**
+ * Create a ChatGroq instance for reasoning/intent tasks
+ * @param {boolean} streaming - Enable streaming mode
+ * @param {Object} overrides - Override default config
+ * @returns {ChatGroq}
+ */
+export function createGroqLLM(streaming = false, overrides = {}) {
+  return new ChatGroq({
+    apiKey: process.env.GROQ_API_KEY?.trim(),
+    model: overrides.model || 'llama-3.1-8b-instant',
+    temperature: overrides.temperature ?? 0,
+    maxRetries: overrides.maxRetries ?? 2,
+    streaming: streaming,
+    ...overrides
   });
 }

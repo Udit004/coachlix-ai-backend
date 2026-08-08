@@ -84,6 +84,9 @@ memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
   cloudApiKey: process.env.CLOUD_API_KEY || '',
   cloudApiSecret: process.env.CLOUD_API_SECRET || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+  groqApiKey: process.env.GROQ_API_KEY || '',
+  groqSummarizerModel: process.env.GROQ_SUMMARIZER_MODEL || 'llama-3.3-70b-versatile',
+  groqIntentModel: process.env.GROQ_INTENT_MODEL || 'llama-3.1-8b-instant',
   geminiApiVersion: process.env.GEMINI_API_VERSION || 'v1alpha',
   geminiLiveModel:
     process.env.GEMINI_LIVE_MODEL ||

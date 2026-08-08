@@ -2,7 +2,7 @@
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { QueryType } from "../../../reasoning/intentRouter.js";
-import { createStreamingLLM } from "../../../config/llmconfig.js";
+import { createGroqLLM } from "../../../config/llmconfig.js";
 import { LLM_CONFIG } from "../../../config/llmconfig.js";
 import {
   shouldEnableSearch,
@@ -186,16 +186,13 @@ function formatHistoryForClassifier(conversationHistory) {
 }
 
 async function classifyWithSmallLlm(originalMessage, conversationHistory = []) {
-  const classifierLlm = createStreamingLLM(false, {
+  const classifierLlm = createGroqLLM(false, {
     model:
-      process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
+      process.env.GROQ_INTENT_MODEL?.trim() ||
       process.env.GENERAL_QUERY_MODEL?.trim() ||
-      "gemini-2.5-flash-lite",
+      "llama-3.1-8b-instant",
     temperature: 0,
-    maxOutputTokens: 200,
-    topP: 0.1,
-    topK: 1,
-    maxRetries: 0,
+    maxRetries: 1,
   });
 
   const historyText = formatHistoryForClassifier(conversationHistory);

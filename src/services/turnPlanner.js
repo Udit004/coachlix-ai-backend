@@ -20,7 +20,7 @@
 // cache and merged, so we never re-plan an in-flight goal.
 
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import { createStreamingLLM } from "../ai_graph/config/llmconfig.js";
+import { createGroqLLM } from "../ai_graph/config/llmconfig.js";
 
 // ── Heuristic gates (fast, no LLM) ──────────────────────────────────────
 
@@ -188,16 +188,13 @@ Rules:
 - Do NOT invent user data. Output only JSON.`;
 
 async function planWithLlm(message, context) {
-  const plannerLlm = createStreamingLLM(false, {
+  const plannerLlm = createGroqLLM(false, {
     model:
+      process.env.GROQ_INTENT_MODEL?.trim() ||
       process.env.TURN_PLANNER_MODEL?.trim() ||
-      process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
-      "gemini-2.5-flash-lite",
+      "llama-3.1-8b-instant",
     temperature: 0,
-    maxOutputTokens: 400,
-    topP: 0.1,
-    topK: 1,
-    maxRetries: 0,
+    maxRetries: 1,
   });
 
   const contextText = [
