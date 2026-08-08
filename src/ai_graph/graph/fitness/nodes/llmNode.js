@@ -2,7 +2,7 @@
 
 import { AIMessage } from "@langchain/core/messages";
 import { QueryType } from "../../../reasoning/intentRouter.js";
-import { createStreamingLLM, createLLMWithSearch } from "../../../config/llmconfig.js";
+import { createStreamingLLM, createLLMWithSearch, createGroqLLM } from "../../../config/llmconfig.js";
 import { getSearchGroundingConfig } from "../../../config/searchGrounding.js";
 import { createGraphTools } from "../tools/index.js";
 import { getExcludedTools } from "../policies.js";
@@ -10,6 +10,19 @@ import { getExcludedTools } from "../policies.js";
 function isStreamParseError(error) {
   const text = String(error?.message || error || "").toLowerCase();
   return text.includes("failed to parse stream");
+}
+
+function hasImageContent(messages) {
+  for (const msg of messages) {
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === "image_url" || block.image_url) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 const emitEvent = (state, type, payload) => {
@@ -80,17 +93,29 @@ export async function llmNode(state) {
   let llm;
   let runner;
 
+  const hasImage = hasImageContent(messages);
+
   if (isGeneralPath) {
-    llm = createStreamingLLM(true, {
-      model:
-        process.env.GENERAL_QUERY_MODEL?.trim() ||
-        process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
-        "gemini-2.5-flash",
-      temperature: 0.2,
-      maxRetries: 0,
-    });
+    if (hasImage) {
+      llm = createStreamingLLM(true, {
+        model:
+          process.env.GENERAL_QUERY_MODEL?.trim() ||
+          "gemini-2.5-flash",
+        temperature: 0.2,
+        maxRetries: 0,
+      });
+      console.log("[Graph:llm] Using Gemini for GENERAL path (multimodal)");
+    } else {
+      llm = createGroqLLM(true, {
+        model:
+          process.env.GROQ_GENERAL_MODEL?.trim() ||
+          "llama-3.1-8b-instant",
+        temperature: 0.2,
+        maxRetries: 0,
+      });
+      console.log("[Graph:llm] Using Groq for GENERAL path");
+    }
     runner = llm;
-    console.log("[Graph:llm] Using small model for GENERAL path");
   } else {
     tools = createGraphTools(excludedTools);
 
@@ -98,9 +123,17 @@ export async function llmNode(state) {
       const searchConfig = getSearchGroundingConfig({ threshold: 0.7 });
       llm = createLLMWithSearch(true, searchConfig);
       console.log("[Graph:llm] Using Gemini + Google Search grounding");
-    } else {
+    } else if (hasImage) {
       llm = createStreamingLLM(true);
-      console.log("[Graph:llm] Using standard Gemini 2.5 Flash");
+      console.log("[Graph:llm] Using standard Gemini 2.5 Flash (multimodal)");
+    } else {
+      llm = createGroqLLM(true, {
+        model:
+          process.env.GROQ_MAIN_MODEL?.trim() ||
+          "llama-3.3-70b-versatile",
+        temperature: 0.2,
+      });
+      console.log("[Graph:llm] Using Groq (Llama 3.3 70B) for text reasoning");
     }
 
     runner = llm.bindTools(tools);
@@ -141,19 +174,39 @@ export async function llmNode(state) {
       let retryRunner;
 
       if (isGeneralPath) {
-        const retryLlm = createStreamingLLM(false, {
-          model:
-            process.env.GENERAL_QUERY_MODEL?.trim() ||
-            process.env.INTENT_CLASSIFIER_MODEL?.trim() ||
-            "gemini-2.5-flash",
-          temperature: 0.2,
-          maxRetries: 0,
-        });
-        retryRunner = retryLlm;
+        if (hasImage) {
+          const retryLlm = createStreamingLLM(false, {
+            model:
+              process.env.GENERAL_QUERY_MODEL?.trim() ||
+              "gemini-2.5-flash",
+            temperature: 0.2,
+            maxRetries: 0,
+          });
+          retryRunner = retryLlm;
+        } else {
+          const retryLlm = createGroqLLM(false, {
+            model:
+              process.env.GROQ_GENERAL_MODEL?.trim() ||
+              "llama-3.1-8b-instant",
+            temperature: 0.2,
+            maxRetries: 0,
+          });
+          retryRunner = retryLlm;
+        }
       } else {
-        const retryLlm = enableSearch
-          ? createLLMWithSearch(false, getSearchGroundingConfig({ threshold: 0.7 }))
-          : createStreamingLLM(false);
+        let retryLlm;
+        if (enableSearch) {
+          retryLlm = createLLMWithSearch(false, getSearchGroundingConfig({ threshold: 0.7 }));
+        } else if (hasImage) {
+          retryLlm = createStreamingLLM(false);
+        } else {
+          retryLlm = createGroqLLM(false, {
+            model:
+              process.env.GROQ_MAIN_MODEL?.trim() ||
+              "llama-3.3-70b-versatile",
+            temperature: 0.2,
+          });
+        }
         retryRunner = retryLlm.bindTools(tools);
       }
 
