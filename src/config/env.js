@@ -100,8 +100,28 @@ geminiApiKey: process.env.GEMINI_API_KEY || '',
   liveSystemInstruction:
     process.env.LIVE_SYSTEM_INSTRUCTION ||
     'You are Coachlix AI fitness coach. Keep responses concise, practical, and safe.',
-  langchainApiKey: process.env.LANGCHAIN_API_KEY || '',
+langchainApiKey: process.env.LANGCHAIN_API_KEY || '',
   langchainProject: process.env.LANGCHAIN_PROJECT || 'coachlix-ai-fitness',
   langchainTracingV2: toBoolean(process.env.LANGCHAIN_TRACING_V2, false),
-  langchainVerbose: toBoolean(process.env.LANGCHAIN_VERBOSE, false)
+  langchainVerbose: toBoolean(process.env.LANGCHAIN_VERBOSE, false),
+
+  // ── MCP (Model Context Protocol) client layer ──────────────────────────
+  // External MCP tool servers this backend connects to as a CLIENT. These are
+  // additive integration points (internet search, live nutrition DBs, etc.)
+  // that layer on top of the internal toolRegistry. Disabled by default so
+  // existing behavior is unchanged until a server is configured.
+  mcpServersEnabled: toBoolean(process.env.MCP_SERVERS_ENABLED, true),
+  // Mode: "stdio" (local subprocess) or "http" (Streamable HTTP / SSE remote).
+  mcpTransport: process.env.MCP_TRANSPORT || 'http',
+  // Remote HTTP endpoint(s) for external MCP servers (comma-separated).
+  mcpServerUrls: process.env.MCP_SERVER_URLS || '',
+  // Authorisation headers for remote MCP servers (JSON: { "<url>": "Bearer ..." }).
+  mcpServerHeaders: process.env.MCP_SERVER_HEADERS || '',
+  // Local stdio commands (JSON: [{ url/name, command, args[], env{} }]).
+  mcpServerCommands: process.env.MCP_SERVER_COMMANDS || '',
+  // Timeout (ms) for any single MCP tool call before it is treated as failed.
+  mcpToolTimeoutMs: toNumber(process.env.MCP_TOOL_TIMEOUT_MS, 10000),
+  // Whether the search/nutrition MCP tools are exposed to the LLM.
+  mcpSearchEnabled: toBoolean(process.env.MCP_SEARCH_ENABLED, true),
+  mcpNutritionEnabled: toBoolean(process.env.MCP_NUTRITION_ENABLED, true)
 };

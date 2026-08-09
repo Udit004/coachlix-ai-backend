@@ -2,6 +2,7 @@ import { buildServer } from './app.js';
 import { env } from './config/env.js';
 import { connectMongo, disconnectMongo } from './db/mongo.js';
 import { setupAIModule } from './services/aiIntegration.js';
+import { initMcpClient, closeMcpClient } from './ai_graph/mcp/mcpClient.js';
 import { initializeEventBus, closeEventBus } from './services/eventBus.js';
 import { registerAiCompletionNotificationWorker } from './services/aiCompletionNotificationWorker.js';
 import { registerMemoryPromotionPipeline } from './services/memoryPromotionPipeline.js';
@@ -15,6 +16,7 @@ const start = async () => {
     await connectMongo();
     await setupAIModule(env.geminiApiKey);
     await initializeEventBus(fastify);
+    await initMcpClient();
 
 // Register background memory workers (off the hot request path).
     registerMemoryPromotionPipeline();
@@ -35,6 +37,7 @@ const start = async () => {
     const shutdown = async (signal) => {
       fastify.log.info({ signal }, 'Graceful shutdown started');
       await closeEventBus();
+      await closeMcpClient();
       await fastify.close();
       await disconnectMongo();
       process.exit(0);

@@ -9,6 +9,8 @@ import { UpdateWorkoutPlanTool } from './workoutTool.js';
 import { CreateDietPlanTool, UpdateDietPlanTool } from './dietPlanTool.js';
 import { HealthMetricsTool } from './healthMetricsTool.js';
 import { FetchDetailsTool } from './fetchDetailsTool.js';
+import { webSearch } from '../mcp/searchTool.js';
+import { nutritionMcpLookup } from '../mcp/nutritionTool.js';
 
 // Instantiate tool classes once (for backward compatibility with LangChain if needed)
 const nutritionTool = new NutritionLookupTool();
@@ -106,6 +108,8 @@ export async function fetchDetails(params) {
  */
 export const toolRegistry = {
   'nutrition_lookup': nutritionLookup,
+  'web_search': webSearch,
+  'nutrition_mcp_lookup': nutritionMcpLookup,
   'update_workout_plan': updateWorkoutPlan,
   'calculate_health_metrics': calculateHealthMetrics,
   'create_diet_plan': createDietPlan,
@@ -141,34 +145,42 @@ export function getAvailableToolNames() {
  */
 export function getToolDescriptions() {
   return `Available tools:
-1. nutrition_lookup - Look up nutrition information for foods
+1. web_search - Search the live internet for current/up-to-date info (no API key needed)
+   Required args: { query: string, maxResults?: number }
+   Use for recent news, research, current recommendations, athlete info.
+
+2. nutrition_mcp_lookup - Look up LIVE nutrition data from an external DB
+   Required args: { foodName: string, quantity?: number }
+   Use for branded/packaged/regional foods not in the internal DB.
+
+3. nutrition_lookup - Look up nutrition information for foods
    Required args: { foodName: string, userId: string }
 
-2. update_workout_plan - Create or update workout plans
+4. update_workout_plan - Create or update workout plans
    Required args: { userId: string, planName?: string, action?: "get"|"create"|"update", exercises?: Array, duration?: number, difficulty?: string, goal?: string }
 
-3. calculate_health_metrics - Calculate BMI, BMR, calorie needs
+5. calculate_health_metrics - Calculate BMI, BMR, calorie needs
    Required args: { userId: string, action?: "calculate"|"get" }
 
-4. create_diet_plan - Create new personalized diet plans
+6. create_diet_plan - Create new personalized diet plans
    Required args: { userId: string, planName?: string, goal?: string, targetCalories?: number, duration?: number, dietaryRestrictions?: Array }
 
-5. update_diet_targets - Update daily calorie/macro targets or goal of an existing diet plan
+7. update_diet_targets - Update daily calorie/macro targets or goal of an existing diet plan
    Required args: { userId: string, planId?: string, planName?: string, targetCalories?, targetProtein?, targetCarbs?, targetFats?, goal? }
 
-6. replace_diet_day - Replace ALL meals for one specific day of an existing diet plan
+8. replace_diet_day - Replace ALL meals for one specific day of an existing diet plan
    Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, meals: [{type, items:[{name,calories,protein,carbs,fats,quantity?}]}], waterIntake?, notes? }
 
-7. update_diet_meal - Patch a SINGLE meal type on a specific day (other meals untouched)
+9. update_diet_meal - Patch a SINGLE meal type on a specific day (other meals untouched)
    Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: "Breakfast"|"Lunch"|"Dinner"|"Snacks"|"Pre-Workout"|"Post-Workout", items: [{name,calories,protein,carbs,fats,quantity?}] }
 
-8. add_diet_food_item - Add a single food item to a specific meal on a specific day
+10. add_diet_food_item - Add a single food item to a specific meal on a specific day
    Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, item: {name,calories,protein,carbs,fats,quantity?} }
 
-9. remove_diet_food_item - Remove a specific food item from a meal on a specific day
+11. remove_diet_food_item - Remove a specific food item from a meal on a specific day
    Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, foodName: string }
 
-10. fetch_details - Fetch detailed meal or workout information when user needs specifics
+12. fetch_details - Fetch detailed meal or workout information when user needs specifics
    Required args: { userId: string, type: "diet"|"workout", detail?: "today"|"full"|"specific_day", dayNumber?: number }
    Use this when user asks: "What should I eat today?", "Show me my full diet plan", "What exercises today?"`;
 }

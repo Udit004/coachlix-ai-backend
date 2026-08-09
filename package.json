@@ -26,6 +26,7 @@
         "@langchain/langgraph": "^1.2.9",
         "@langchain/mongodb": "^1.1.0",
         "@langchain/openai": "^1.5.6",
+        "@modelcontextprotocol/sdk": "^1.30.0",
         "@pinecone-database/pinecone": "^2.2.2",
         "@upstash/redis": "^1.38.0",
         "bullmq": "^5.81.3",

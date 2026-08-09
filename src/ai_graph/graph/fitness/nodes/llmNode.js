@@ -85,23 +85,31 @@ function buildRunnerChain({ isGeneralPath, hasImage, enableSearch, tools }) {
   const bind = (llm) => (tools.length > 0 ? llm.bindTools(tools) : llm);
 
   if (isGeneralPath) {
-    // General text: no tools needed.
+    // General text: normally no tools needed. But when a general-safe tool
+    // (e.g. web_search) is present, bind it so the model can fetch CURRENT
+    // info for "latest research / recommendations" questions without loading
+    // any personal plan data.
+    const bindGeneral = (llm) => tools.length > 0 ? llm.bindTools(tools) : llm;
     chain.push({
       label: "groq-70b",
-      runner: createGroqLLM(true, {
-        model: process.env.GROQ_GENERAL_MODEL?.trim() || "llama-3.3-70b-versatile",
-        temperature: 0.2,
-        maxRetries: 0,
-      }),
+      runner: bindGeneral(
+        createGroqLLM(true, {
+          model: process.env.GROQ_GENERAL_MODEL?.trim() || "llama-3.3-70b-versatile",
+          temperature: 0.2,
+          maxRetries: 0,
+        })
+      ),
       streaming: true,
     });
     chain.push({
       label: "groq-8b",
-      runner: createGroqLLM(true, {
-        model: process.env.GROQ_SMALL_MODEL?.trim() || "llama-3.1-8b-instant",
-        temperature: 0.2,
-        maxRetries: 0,
-      }),
+      runner: bindGeneral(
+        createGroqLLM(true, {
+          model: process.env.GROQ_SMALL_MODEL?.trim() || "llama-3.1-8b-instant",
+          temperature: 0.2,
+          maxRetries: 0,
+        })
+      ),
       streaming: true,
     });
     return chain;
@@ -216,7 +224,10 @@ export async function llmNode(state) {
     );
   }
 
-const tools = isGeneralPath || forceText ? [] : createGraphTools(excludedTools);
+// On the general path we still build tools so the general-safe web_search tool
+// is available (personal tools are excluded by policies). On forceText or when
+// tools are disabled, bind no tools.
+const tools = forceText ? [] : createGraphTools(excludedTools);
   const hasImage = hasImageContent(messages);
 
   // ── Build the ordered fallback chain (highest quality → lowest). ──────

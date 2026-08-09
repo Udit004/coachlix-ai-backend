@@ -29,6 +29,74 @@ LANGCHAIN_VERBOSE=true
 LANGCHAIN_TRACING_V2=true
 ```
 
+## 2b) MCP (Model Context Protocol) client layer
+
+The backend can act as an **MCP client** and call external MCP tool servers
+(internet search, live nutrition databases, etc.) in addition to the internal
+tool registry. This is **off by default** and purely additive.
+
+> **How to get a working server URL.** There is no universal free URL you can
+> paste in — MCP requires *you* to provide a server. The easiest way to get
+> internet search working is the **stdio** transport: it launches a local
+> search server via `npx` (no URL needed).
+
+### Option A — Internet search via stdio (no URL needed, easiest)
+
+```env
+MCP_SERVERS_ENABLED=true
+MCP_TRANSPORT=stdio
+MCP_SEARCH_ENABLED=true
+MCP_NUTRITION_ENABLED=false
+# Brave search (get a free API key at https://api.search.brave.com)
+MCP_SERVER_COMMANDS=[{"id":"search","name":"search-brave","command":"npx","args":["-y","@modelcontextprotocol/server-brave-search"],"env":{"BRAVE_API_KEY":"your_brave_key"}}]
+```
+
+If you don't want to sign up for Brave, use DuckDuckGo (no key) via Tavily-style
+locally or a generic fetch server. A key-free stdio option:
+```env
+MCP_SERVER_COMMANDS=[{"id":"search","name":"search","command":"npx","args":["-y","@social29/mcp-server-duckduckgo"]}]
+```
+
+### Option B — Remote HTTP servers (require a URL you own or an MCP hub)
+
+```env
+MCP_SERVERS_ENABLED=true
+MCP_TRANSPORT=http
+MCP_SEARCH_ENABLED=true
+MCP_NUTRITION_ENABLED=true
+# Put YOUR server URLs here (self-hosted MCP server, or a hosted MCP gateway
+# that gives you an endpoint). Do NOT use someone else's random URL — MCP
+# servers validate the protocol handshake and will reject foreign callers.
+MCP_SERVER_URLS=
+# Optional auth headers as JSON: { "<url>": "Bearer <token>" }
+MCP_SERVER_HEADERS=
+```
+
+### All MCP env vars
+
+```env
+# Master switch
+MCP_SERVERS_ENABLED=false
+# "http" (remote) or "stdio" (local subprocess)
+MCP_TRANSPORT=http
+# HTTP: comma-separated remote MCP server URLs
+MCP_SERVER_URLS=
+# HTTP: optional auth headers JSON { "<url>": "Bearer <token>" }
+MCP_SERVER_HEADERS=
+# stdio: JSON array of commands (see Option A)
+MCP_SERVER_COMMANDS=
+# Per-tool-call timeout in ms
+MCP_TOOL_TIMEOUT_MS=10000
+# Expose the web_search / nutrition_mcp_lookup tools to the LLM
+MCP_SEARCH_ENABLED=true
+MCP_NUTRITION_ENABLED=true
+```
+
+Exposed agent tools:
+- `web_search` — live internet search via an MCP search server.
+- `nutrition_mcp_lookup` — live nutrition DB lookup via an MCP nutrition server.
+- `nutrition_lookup` — the existing internal nutrition lookup (unchanged).
+
 ## 3) Run
 
 ```bash

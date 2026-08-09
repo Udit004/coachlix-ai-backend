@@ -45,3 +45,23 @@ export {
 } from "./config/searchGrounding.js";
 
 export * from "./tools/index.js";
+
+// ── MCP (Model Context Protocol) client layer ────────────────────────────
+export {
+  initMcpClient,
+  getMcpStatus,
+  callMcpTool,
+  findMcpTool,
+  findMcpToolByHint,
+  closeMcpClient,
+} from "./mcp/mcpClient.js";
+
+export {
+  webSearch,
+  createMcpWebSearchTool,
+} from "./mcp/searchTool.js";
+
+export {
+  nutritionMcpLookup,
+  createMcpNutritionLookupTool,
+} from "./mcp/nutritionTool.js";

@@ -13,6 +13,7 @@ import {
 } from "../multimodal/contentBuilder.js";
 import { getContextStats } from "../search/semanticMemoryRetrieval.js";
 import { emitAiEvent } from "../../services/eventBus.js";
+import { initMcpClient } from "../mcp/mcpClient.js";
 
 function projectProfileForClassification(profile) {
   if (!profile || typeof profile !== "object") return null;
@@ -113,6 +114,15 @@ export async function processChatWithGraph(params, onChunk, onEvent) {
   let enableSearchMeta = false;
 
 const graph = getCompiledGraph();
+
+  // Ensure the MCP client is connected before the graph runs so external
+  // tools (internet search, live nutrition) are available. This is idempotent
+  // and a no-op when MCP_SERVERS_ENABLED is false.
+  try {
+    await initMcpClient();
+  } catch (mcpError) {
+    console.warn("[Graph] MCP init warning:", mcpError?.message || mcpError);
+  }
 
   try {
     // Pass a bounded recursion limit as a safety net. The tool-loop guard in

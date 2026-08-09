@@ -12,6 +12,9 @@ import {
   createRemoveFoodItemTool,
 } from "./updateDietPlanTool.js";
 import { createFetchDetailsTool } from "./fetchDetailsTool.js";
+import { createMcpWebSearchTool } from "../../../mcp/searchTool.js";
+import { createMcpNutritionLookupTool } from "../../../mcp/nutritionTool.js";
+import { env } from "../../../../config/env.js";
 
 export function createGraphTools(excludedTools = []) {
   const allTools = [
@@ -26,6 +29,18 @@ export function createGraphTools(excludedTools = []) {
     createRemoveFoodItemTool(),
     createFetchDetailsTool(),
   ];
+
+  // ENHANCED: Append search + external nutrition tools.
+  // - web_search needs NO MCP server / API key (DuckDuckGo fallback), so it is
+  //   always available when search is enabled — works on Render/localhost.
+  // - nutrition_mcp_lookup DOES require an MCP server, so it is only added
+  //   when the MCP layer is enabled.
+  if (env.mcpSearchEnabled) {
+    allTools.push(createMcpWebSearchTool());
+  }
+  if (env.mcpServersEnabled && env.mcpNutritionEnabled) {
+    allTools.push(createMcpNutritionLookupTool());
+  }
 
   if (!excludedTools || excludedTools.length === 0) {
     return allTools;

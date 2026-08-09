@@ -30,6 +30,15 @@ const PERSONAL_TOOLS = [
   "fetch_details",
 ];
 
+/**
+ * Tools that are NON-personal and safe to expose on the general fitness path
+ * (does not require any user/DB context). These layer on top of the excluded
+ * PERSONAL_TOOLS. Currently that is just the MCP internet search tool, which
+ * is perfect for general "latest research / current recommendations" queries
+ * that should NOT load personal plan data.
+ */
+const GENERAL_TOOLS = ["web_search"];
+
 export function shouldSkipRag(intent) {
   if (!intent?.intent) return false;
   const skipForGeneral = intent.intent === "question_general" && !intent.requiresData;
@@ -89,7 +98,13 @@ export function getExcludedTools({ enableSearch, queryType, intent, userContext 
   }
 
   if (queryType === QueryType.GENERAL_FITNESS) {
+    // Personal tools must be excluded on the general path.
     PERSONAL_TOOLS.forEach((tool) => excluded.add(tool));
+    // Everything EXCEPT the always-safe GENERAL_TOOLS is excluded on the
+    // general path. This keeps web_search (and any future non-personal tools)
+    // available for "current info / research" questions without loading any
+    // personal plan data.
+    GENERAL_TOOLS.forEach((tool) => excluded.delete(tool));
   }
 
   if (shouldExcludeFetchDetailsForPlanModification(intent, userContext)) {
