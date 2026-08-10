@@ -90,9 +90,21 @@ async function duckDuckGoSearch(query, maxResults) {
     return `Internet search error: could not parse results from DuckDuckGo.`;
   }
 
-  const lines = [];
+  // Return clean, structured, link-ready results. Each result carries a
+  // "link" field with Markdown [Title](URL). This makes it trivial for the
+  // LLM to render clickable links and makes it impossible for it to echo back
+  // raw https:// URL dumps. It also keeps the title, snippet, and URL together
+  // so the final answer reads naturally instead of a bare bullet list.
   results.forEach((r, i) => {
-    lines.push(`• ${r.title}\n  ${snippets[i] || ""}\n  ${r.url}`);
+    r.snippet = snippets[i] || "";
+    r.link = `[${r.title}](${r.url})`;
+  });
+
+  const lines = [];
+  lines.push(`Found ${results.length} web results for "${query}".`);
+  results.forEach((r, i) => {
+    lines.push(`${i + 1}. ${r.link}`);
+    if (r.snippet) lines.push(`   ${r.snippet}`);
   });
   return lines.join("\n");
 }

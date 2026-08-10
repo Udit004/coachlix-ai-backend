@@ -4,10 +4,8 @@ import { buildSmartContext } from "../../../search/semanticMemoryRetrieval.js";
 import { fetchNutritionFromUSDA } from "../../../tools/nutritionTool.js";
 import { shouldSkipRag } from "../policies.js";
 import {
-  retrieveMemory,
-  getUserMemoryProfile,
-  formatMemoryForContext,
-} from "../../../../services/longTermMemoryService.js";
+  buildLongTermMemoryContext,
+} from "../../../../services/memoryManager.js";
 
 const emitEvent = (state, type, payload) => {
   if (typeof state?.onEvent === "function") {
@@ -29,13 +27,7 @@ async function buildLongTermMemory(userId, query) {
   }
 
   try {
-    const [memoryProfile, recalled] = await Promise.all([
-      getUserMemoryProfile(userId),
-      retrieveMemory(userId, query),
-    ]);
-
-    const text = formatMemoryForContext(memoryProfile, recalled);
-    return { memoryProfile, recalled, text };
+    return await buildLongTermMemoryContext(userId, query);
   } catch (error) {
     console.error("[Graph:context] Long-term memory retrieval failed:", error?.message || error);
     return { memoryProfile: null, recalled: { results: [], source: "none" }, text: "" };

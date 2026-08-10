@@ -27,7 +27,43 @@ LANGCHAIN_API_KEY=your_langsmith_key
 LANGCHAIN_PROJECT=coachlix-ai-fitness
 LANGCHAIN_VERBOSE=true
 LANGCHAIN_TRACING_V2=true
+MEMORY_PROVIDER=mem0
+MEM0_ENABLED=true
+MEM0_API_KEY=
+MEM0_BASE_URL=https://api.mem0.ai
+MEM0_API_HOST=
+MEMORY_LANGMEM_COMPAT_ENABLED=true
+MEMORY_LANGMEM_COMPAT_RETRIEVAL_ENABLED=true
+MEMORY_LEGACY_LONG_TERM_ENABLED=true
 ```
+
+## 2a) Hybrid long-term memory
+
+The backend now supports a `mem0` long-term memory mode and uses it as the
+default primary provider when a `MEM0_API_KEY` is configured.
+
+Available modes:
+
+```env
+# `mem0` = Mem0-backed long-term memory (primary)
+# `legacy` = existing custom memory pipeline only
+# `hybrid` = existing storage/retrieval + structured memory promotion layer
+MEMORY_PROVIDER=mem0
+MEM0_ENABLED=true
+MEM0_API_KEY=
+MEM0_BASE_URL=https://api.mem0.ai
+MEM0_API_HOST=
+MEMORY_LANGMEM_COMPAT_ENABLED=true
+MEMORY_LANGMEM_COMPAT_RETRIEVAL_ENABLED=true
+MEMORY_LEGACY_LONG_TERM_ENABLED=true
+```
+
+Notes:
+- Mem0 SDK was installed with `npm install mem0ai --legacy-peer-deps` because the project pins an older Pinecone SDK than Mem0's optional peer range.
+- The migration uses Mem0's `MemoryClient` path, which is the clean fit for this Node backend.
+- If you are using Mem0 Platform, the hosted base URL is `https://api.mem0.ai`. The app now accepts either `MEM0_BASE_URL` or `MEM0_API_HOST`.
+- Mem0 becomes active only when `MEM0_API_KEY` is present; otherwise the backend falls back to the legacy long-term memory path.
+- `MEMORY_LEGACY_LONG_TERM_ENABLED=true` keeps the previous custom long-term memory as a safety fallback until Mem0 is fully validated.
 
 ## 2b) MCP (Model Context Protocol) client layer
 

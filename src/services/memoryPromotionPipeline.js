@@ -20,6 +20,7 @@ import {
   getRecentFacts,
   primeHotCache,
 } from './longTermMemoryService.js';
+import { promoteStructuredMemories } from './memoryManager.js';
 import {
   canSpendMemoryLlmBudget,
   canSpendMemoryLlmBudgetForUser,
@@ -100,6 +101,9 @@ async function extractFacts(transcript) {
  */
 export async function runMemoryPromotion(session) {
   if (!session?._id) return { promoted: 0 };
+  if (!env.memoryLegacyLongTermEnabled && env.memoryProvider !== 'mem0') {
+    return { promoted: 0, skipped: 'legacy-long-term-memory-disabled' };
+  }
 
   const userId = session.userId;
   const sessionId = String(session._id);
@@ -118,6 +122,17 @@ export async function runMemoryPromotion(session) {
   // Respect the per-session cooldown so we don't call the LLM on every turn.
   if (await isWithinCooldown('promotion', sessionId)) {
     return { promoted: 0, skipped: 'cooldown' };
+  }
+
+  const hybridPromotion = await promoteStructuredMemories({
+    userId,
+    transcript,
+    messages: messages.slice(-4),
+    source: 'conversation',
+  });
+  if (hybridPromotion.promoted > 0) {
+    await markMemoryRun('promotion', sessionId);
+    return hybridPromotion;
   }
 
   // Try cheap heuristic extraction first (no LLM call). If it captures the

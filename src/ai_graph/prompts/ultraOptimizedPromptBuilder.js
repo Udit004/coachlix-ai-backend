@@ -40,6 +40,8 @@ User: ${name}`;
     
     if (location) prompt += `, Location: ${location}`;
     if (gender) prompt += `, Gender: ${gender}`;
+
+    prompt += SEARCH_FORMAT_GUIDE;
     
     return prompt;
   },
@@ -273,6 +275,22 @@ Profile:`;
     return `You are Coachlix AI, a fitness expert. Advise ${name} on supplements. Be evidence-based and safety-focused. Recommend consulting a doctor for medical concerns.`;
   }
 };
+
+/**
+ * When the agent uses web_search, the LLM must render results as clean,
+ * clickable Markdown links and MUST NOT echo back the raw tool output (which
+ * currently looks like a bare bullet list with bare https:// strings). This
+ * guide is appended to any intent that can trigger web search.
+ */
+const SEARCH_FORMAT_GUIDE = `
+
+🔍 **After you use web_search, format results like this:**
+- Give a short 1-2 sentence summary that directly answers the user's question.
+- Then list each useful result as a **clickable Markdown link**, exactly like:
+  [Result title](URL)
+- Do NOT paste the raw tool output, do NOT show bare https:// URLs as plain text,
+  and do NOT output the "Found N web results" line or the bullet/URL dump.
+- Keep it clean and helpful: title as the link text, one short line of context per link.`;
 
 /**
  * Helper function to detect if user is from India

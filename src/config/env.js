@@ -40,6 +40,22 @@ pineconeEmbeddingModel: process.env.PINECONE_EMBEDDING_MODEL || 'gemini-embeddin
   memorySummaryThreshold: toNumber(process.env.MEMORY_SUMMARY_THRESHOLD, 8),
 memoryProfileTtlSeconds: toNumber(process.env.MEMORY_PROFILE_TTL_SECONDS, 60 * 60),
   memoryHotCacheTtlSeconds: toNumber(process.env.MEMORY_HOT_CACHE_TTL_SECONDS, 60 * 30),
+  memoryProvider: process.env.MEMORY_PROVIDER || 'mem0',
+  memoryLangmemCompatEnabled: toBoolean(process.env.MEMORY_LANGMEM_COMPAT_ENABLED, true),
+  memoryLangmemCompatRetrievalEnabled: toBoolean(
+    process.env.MEMORY_LANGMEM_COMPAT_RETRIEVAL_ENABLED,
+    true
+  ),
+  mem0ApiKey: process.env.MEM0_API_KEY || '',
+  mem0BaseUrl: process.env.MEM0_BASE_URL || process.env.MEM0_API_HOST || '',
+  mem0ApiHost: process.env.MEM0_API_HOST || process.env.MEM0_BASE_URL || '',
+  mem0Enabled: toBoolean(process.env.MEM0_ENABLED, Boolean(process.env.MEM0_API_KEY)),
+  // Legacy custom long-term memory can be left in the codebase but disabled
+  // while we transition toward a LangMem-based replacement.
+  memoryLegacyLongTermEnabled: toBoolean(
+    process.env.MEMORY_LEGACY_LONG_TERM_ENABLED,
+    true
+  ),
   geminiSummarizerModel: process.env.GEMINI_SUMMARIZER_MODEL || 'gemini-2.5-flash',
 memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
   memoryLlmMaxPerMinute: toNumber(process.env.MEMORY_LLM_MAX_PER_MINUTE, 10),

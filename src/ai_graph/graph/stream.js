@@ -49,6 +49,48 @@ function projectProfileForClassification(profile) {
   );
 }
 
+/**
+ * Deterministic safety net: if a weaker model echoed the raw web_search tool
+ * output verbatim into its final answer, strip the raw "Found N web results..."
+ * block (and any leftover bare numbered bullet list of results) so it never
+ * reaches the user-facing chat. The clean assistant reply that follows is kept.
+ */
+function sanitizeWebSearchOutput(content) {
+  if (typeof content !== "string" || !content) return content;
+
+  // Pattern 1: the raw tool dump header "Found N web results for "..."."
+  // followed by the numbered result list up to the first blank line. We cut
+  // everything from that header up to (but not including) the first paragraph
+  // break, which is where the model's own reply normally begins.
+  const headerMatch = content.match(/Found\s+\d+\s+web results?/i);
+  if (headerMatch) {
+    const start = headerMatch.index;
+    const afterHeader = content.slice(start);
+    // Stop at the first blank line (double newline) after the list.
+    const end = afterHeader.search(/\n\s*\n/);
+    const cutEnd = end === -1 ? content.length : start + end;
+    const cleaned = (content.slice(0, start) + content.slice(cutEnd)).trim();
+    if (cleaned) return cleaned;
+  }
+
+  // Pattern 2: a stray numbered list of bare markdown links with no header
+  // (e.g. "1. [Title](URL)\n2. [Title](URL)..."). Rebuild it as clean clickable
+  // links only if it starts the message and the model produced no text before.
+  const numberedLinkBlock = /^(\d+\.\s+\[[^\]]+\]\([^)]+\)\s*(?:\n|$))+/;
+  const m = content.match(numberedLinkBlock);
+  if (m && m[0].length > 0) {
+    const block = m[0];
+    const rest = content.slice(block.length);
+    // Only strip the block if there is meaningful text after it; otherwise keep
+    // the links (better than returning nothing).
+    if (rest && rest.trim()) {
+      return rest.trim();
+    }
+  }
+
+  return content;
+}
+
 const emitBoth = async (type, payload, onEvent) => {
   await emitAiEvent(type, payload);
   if (typeof onEvent === "function") {
@@ -221,6 +263,19 @@ const graph = getCompiledGraph();
         toolsUsed = [...toolsUsed, ...output.toolsUsed];
       }
     }
+
+    // ── Post-process the final response to strip any residual raw web-search ─
+    // tool output that a weaker model may have echoed verbatim. Without this,
+    // the "Found N web results..." bullet dump can leak into the user-facing
+    // chat even when the model was instructed not to repeat it.
+    const sanitizedResponse = sanitizeWebSearchOutput(fullResponse);
+    if (sanitizedResponse !== fullResponse) {
+      console.warn(
+        "[Graph:stream] Stripped residual raw web-search tool output from final response"
+      );
+    }
+    fullResponse = sanitizedResponse;
+    lastWord = lastWord || "done";
 
     await sendCompletionSignal(onChunk, fullResponse, lastWord || "done");
 

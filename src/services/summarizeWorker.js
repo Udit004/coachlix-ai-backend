@@ -67,6 +67,9 @@ function parseSummary(raw) {
  */
 export async function summarizeSession(session) {
   if (!session?._id) return null;
+  if (!env.memoryLegacyLongTermEnabled) {
+    return null;
+  }
 
   const userId = session.userId;
   const sessionId = String(session._id);
