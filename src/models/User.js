@@ -34,8 +34,12 @@ const StatsSchema = new mongoose.Schema(
   { _id: false }
 );
 
-const UserSchema = new mongoose.Schema(
-  {
+const UserSchema = new mongoose.Schema({
+    accessToken: { type: String, default: null },
+    refreshToken: { type: String, default: null },
+    tokenExpiry: { type: Date, default: null },
+    calendarSyncEnabled: { type: Boolean, default: false },
+
     firebaseUid: {
       type: String,
       required: true,

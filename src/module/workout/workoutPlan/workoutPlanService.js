@@ -1,5 +1,6 @@
 import WorkoutPlan from '../../../models/WorkoutPlan.js';
 import User from '../../../models/User.js';
+// import { syncWorkoutPlanToCalendar } from '../../calendar/syncService.js';
 import { getCacheValue, setCacheValue, findCacheKeys, deleteCacheKey } from '../../../shared/cache.js';
 
 const CACHE_TTL = {
@@ -186,6 +187,7 @@ export async function createWorkoutPlan(userId, body) {
   const savedPlan = await plan.save();
 
   await invalidateWorkoutPlanCache(userId);
+await syncWorkoutPlanToCalendar(userId, savedPlan);
 
   return {
     success: true,

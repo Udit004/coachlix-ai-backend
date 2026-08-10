@@ -1,4 +1,6 @@
 import { registerDietModule } from '../module/diet/index.js';
+import { registerCalendarModule } from '../module/calendar/index.js';
+import { registerOAuthController } from '../module/calendar/oauthController.js';
 import { registerWorkoutModule } from '../module/workout/index.js';
 import { registerDashboardModule } from '../module/dashboard/index.js';
 import { registerProfileModule } from '../module/profile/index.js';
@@ -26,5 +28,7 @@ export async function apiRoutes(fastify) {
 await fastify.register(registerDashboardModule);
   await fastify.register(registerProfileModule);
   await fastify.register(registerGoalModule, { prefix: '/goals' });
+  await fastify.register(registerCalendarModule, { prefix: '/calendar' });
+  await fastify.register(registerOAuthController, { prefix: '/calendar' });
 
 }

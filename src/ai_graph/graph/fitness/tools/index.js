@@ -14,6 +14,7 @@ import {
 import { createFetchDetailsTool } from "./fetchDetailsTool.js";
 import { createMcpWebSearchTool } from "../../../mcp/searchTool.js";
 import { createMcpNutritionLookupTool } from "../../../mcp/nutritionTool.js";
+import { createCalendarCreateEventTool } from "../../../mcp/calendarTool.js";
 import { env } from "../../../../config/env.js";
 
 export function createGraphTools(excludedTools = []) {
@@ -40,6 +41,12 @@ export function createGraphTools(excludedTools = []) {
   }
   if (env.mcpServersEnabled && env.mcpNutritionEnabled) {
     allTools.push(createMcpNutritionLookupTool());
+  }
+  // calendar_create_event: uses stored OAuth tokens directly (no MCP server needed
+  // as long as the user has connected Google Calendar). Always added when calendar enabled.
+  if (env.mcpCalendarEnabled) {
+    // userId is injected at runtime per-session; pass null here and override in session context
+    allTools.push(createCalendarCreateEventTool(null));
   }
 
   if (!excludedTools || excludedTools.length === 0) {

@@ -33,12 +33,12 @@ export const env = {
   pineconeApiKey: process.env.PINECONE_API_KEY || '',
   pineconeIndexName: process.env.PINECONE_INDEX_NAME || 'coachlix-fitness',
   pineconeMemoryNamespace: process.env.PINECONE_MEMORY_NAMESPACE || 'memory',
-pineconeEmbeddingModel: process.env.PINECONE_EMBEDDING_MODEL || 'gemini-embedding-001',
+  pineconeEmbeddingModel: process.env.PINECONE_EMBEDDING_MODEL || 'gemini-embedding-001',
   pineconeEmbeddingDimension: toNumber(process.env.PINECONE_EMBEDDING_DIMENSION, 1024),
   memoryVectorTopK: toNumber(process.env.MEMORY_VECTOR_TOP_K, 5),
   memoryPromotionThreshold: toNumber(process.env.MEMORY_PROMOTION_THRESHOLD, 2),
   memorySummaryThreshold: toNumber(process.env.MEMORY_SUMMARY_THRESHOLD, 8),
-memoryProfileTtlSeconds: toNumber(process.env.MEMORY_PROFILE_TTL_SECONDS, 60 * 60),
+  memoryProfileTtlSeconds: toNumber(process.env.MEMORY_PROFILE_TTL_SECONDS, 60 * 60),
   memoryHotCacheTtlSeconds: toNumber(process.env.MEMORY_HOT_CACHE_TTL_SECONDS, 60 * 30),
   memoryProvider: process.env.MEMORY_PROVIDER || 'mem0',
   memoryLangmemCompatEnabled: toBoolean(process.env.MEMORY_LANGMEM_COMPAT_ENABLED, true),
@@ -57,7 +57,7 @@ memoryProfileTtlSeconds: toNumber(process.env.MEMORY_PROFILE_TTL_SECONDS, 60 * 6
     true
   ),
   geminiSummarizerModel: process.env.GEMINI_SUMMARIZER_MODEL || 'gemini-2.5-flash',
-memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
+  memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
   memoryLlmMaxPerMinute: toNumber(process.env.MEMORY_LLM_MAX_PER_MINUTE, 10),
   // Minimum gap (seconds) between memory LLM runs for the SAME session. The
   // turn lock expires after this window, so at most ONE memory LLM call can
@@ -78,7 +78,7 @@ memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
     process.env.GOAL_ACTIVE_CACHE_TTL_SECONDS,
     60 * 60
   ),
-// TTL for a "draft" goal that is awaiting clarification from the user.
+  // TTL for a "draft" goal that is awaiting clarification from the user.
   // After this window the draft expires so a stale partial goal is not
   // resumed later.
   goalDraftTtlSeconds: toNumber(process.env.GOAL_DRAFT_TTL_SECONDS, 60 * 30),
@@ -99,7 +99,7 @@ memoryCooldownSeconds: toNumber(process.env.MEMORY_COOLDOWN_SECONDS, 5 * 60),
   cloudName: process.env.CLOUD_NAME || '',
   cloudApiKey: process.env.CLOUD_API_KEY || '',
   cloudApiSecret: process.env.CLOUD_API_SECRET || '',
-geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
   groqApiKey: process.env.GROQ_API_KEY || '',
   openRouterApiKey: process.env.OPENROUTER_API_KEY || '',
   openRouterBaseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
@@ -116,7 +116,7 @@ geminiApiKey: process.env.GEMINI_API_KEY || '',
   liveSystemInstruction:
     process.env.LIVE_SYSTEM_INSTRUCTION ||
     'You are Coachlix AI fitness coach. Keep responses concise, practical, and safe.',
-langchainApiKey: process.env.LANGCHAIN_API_KEY || '',
+  langchainApiKey: process.env.LANGCHAIN_API_KEY || '',
   langchainProject: process.env.LANGCHAIN_PROJECT || 'coachlix-ai-fitness',
   langchainTracingV2: toBoolean(process.env.LANGCHAIN_TRACING_V2, false),
   langchainVerbose: toBoolean(process.env.LANGCHAIN_VERBOSE, false),
@@ -137,7 +137,18 @@ langchainApiKey: process.env.LANGCHAIN_API_KEY || '',
   mcpServerCommands: process.env.MCP_SERVER_COMMANDS || '',
   // Timeout (ms) for any single MCP tool call before it is treated as failed.
   mcpToolTimeoutMs: toNumber(process.env.MCP_TOOL_TIMEOUT_MS, 10000),
-  // Whether the search/nutrition MCP tools are exposed to the LLM.
+  // Whether the search/nutrition/calendar MCP tools are exposed to the LLM.
   mcpSearchEnabled: toBoolean(process.env.MCP_SEARCH_ENABLED, true),
-  mcpNutritionEnabled: toBoolean(process.env.MCP_NUTRITION_ENABLED, true)
+  mcpNutritionEnabled: toBoolean(process.env.MCP_NUTRITION_ENABLED, true),
+  mcpCalendarEnabled: toBoolean(process.env.MCP_CALENDAR_ENABLED, true),
+
+  // ── Google Calendar OAuth ──────────────────────────────────────────────────
+  googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || '',
+  // Base URL of the frontend app (used for OAuth callback redirects).
+  // Falls back to the first value in FRONTEND_ORIGIN.
+  frontendBaseUrl:
+    process.env.FRONTEND_BASE_URL ||
+    (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').split(',')[0].trim(),
 };

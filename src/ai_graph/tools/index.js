@@ -11,6 +11,7 @@ import { HealthMetricsTool } from './healthMetricsTool.js';
 import { FetchDetailsTool } from './fetchDetailsTool.js';
 import { webSearch } from '../mcp/searchTool.js';
 import { nutritionMcpLookup } from '../mcp/nutritionTool.js';
+import { calendarCreateEvent } from '../mcp/calendarTool.js';
 
 // Instantiate tool classes once (for backward compatibility with LangChain if needed)
 const nutritionTool = new NutritionLookupTool();
@@ -120,6 +121,7 @@ export const toolRegistry = {
   'add_diet_food_item': updateDietPlan,
   'remove_diet_food_item': updateDietPlan,
   'fetch_details': fetchDetails,
+  'calendar_create_event': calendarCreateEvent,
 };
 
 /**
@@ -181,7 +183,10 @@ export function getToolDescriptions() {
    Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, foodName: string }
 
 12. fetch_details - Fetch detailed meal or workout information when user needs specifics
-   Required args: { userId: string, type: "diet"|"workout", detail?: "today"|"full"|"specific_day", dayNumber?: number }
-   Use this when user asks: "What should I eat today?", "Show me my full diet plan", "What exercises today?"`;
-}
+    Required args: { userId: string, type: "diet"|"workout", detail?: "today"|"full"|"specific_day", dayNumber?: number }
+    Use this when user asks: "What should I eat today?", "Show me my full diet plan", "What exercises today?"
 
+13. calendar_create_event - Create a Google Calendar event for the user
+    Required args: { userId: string, summary: string, description?: string, startTime: string, durationMinutes?: number }
+    Use this when the LLM wants to schedule a workout or appointment in the user's calendar.`;
+}
