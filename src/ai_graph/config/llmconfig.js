@@ -176,3 +176,26 @@ export function createGroqLLM(streaming = false, overrides = {}) {
     ...overrides
   });
 }
+
+/**
+ * Create a ChatOpenAI instance pointed at NVIDIA (OpenAI-compatible).
+ * Assumes NVIDIA_API_KEY and NVIDIA_BASE_URL are set in env.
+ * @param {boolean} streaming - Enable streaming mode
+ * @param {Object} overrides - Override default config
+ * @returns {ChatOpenAI}
+ */
+export function createNvidiaLLM(streaming = true, overrides = {}) {
+  const baseURL = process.env.NVIDIA_BASE_URL?.trim() || "https://integrate.api.nvidia.com/v1";
+  const model = process.env.NVIDIA_MODEL?.trim() || "nemotron-3-ultra-550b-a55b";
+  return new ChatOpenAI({
+    apiKey: process.env.NVIDIA_API_KEY?.trim(),
+    model,
+    temperature: overrides.temperature ?? 0.2,
+    maxRetries: overrides.maxRetries ?? 0,
+    streaming,
+    configuration: {
+      baseURL,
+    },
+    ...overrides,
+  });
+}

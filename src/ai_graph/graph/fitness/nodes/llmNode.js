@@ -5,6 +5,7 @@ import { QueryType } from "../../../reasoning/intentRouter.js";
 import {
   createStreamingLLM,
   createGroqLLM,
+  createNvidiaLLM,
   createOpenRouterLLM,
   createOpenRouterModelLLM,
   OPENROUTER_CONFIG,
@@ -23,6 +24,24 @@ function hasImageContent(messages) {
     }
   }
   return false;
+}
+
+/**
+ * Rough token estimate: 1 token ~= 4 chars for English.
+ * Sum characters of all message contents.
+ */
+function estimateTokens(messages) {
+  let chars = 0;
+  for (const msg of messages) {
+    if (typeof msg.content === "string") {
+      chars += msg.content.length;
+    } else if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (typeof block.text === "string") chars += block.text.length;
+      }
+    }
+  }
+  return Math.ceil(chars / 4);
 }
 
 const emitEvent = (state, type, payload) => {
@@ -62,13 +81,10 @@ function logResponseSummary(response) {
  * @param {Array}   opts.tools - bound tool list (may be empty)
  * @returns {Array<{label:string, runner:any, streaming:boolean}>}
  */
-function buildRunnerChain({ isGeneralPath, hasImage, enableSearch, tools }) {
+function buildRunnerChain({ isGeneralPath, hasImage, enableSearch, tools, tokenSize }) {
   const chain = [];
 
-  // ── Images/files MUST use a multimodal model (Gemini). ─────────────────
-  // Gemini does NOT support the complex JSON-Schema `$ref` produced by the
-  // nested DynamicStructuredTool schemas, so we NEVER bind tools to it.
-  // Image requests don't need tool-calling anyway.
+  // Images/files MUST use a multimodal model (Gemini).
   if (hasImage) {
     chain.push({
       label: "gemini-2.5-flash",
@@ -78,18 +94,10 @@ function buildRunnerChain({ isGeneralPath, hasImage, enableSearch, tools }) {
     return chain;
   }
 
-  // ── Text paths: always Groq (70B primary, 8B fallback). ────────────────
-  // Gemini is reserved exclusively for images/files. Binding the complex tool
-  // schemas to Gemini throws a 400 `$ref` error, and Groq is the preferred
-  // text model anyway.
   const bind = (llm) => (tools.length > 0 ? llm.bindTools(tools) : llm);
 
   if (isGeneralPath) {
-    // General text: normally no tools needed. But when a general-safe tool
-    // (e.g. web_search) is present, bind it so the model can fetch CURRENT
-    // info for "latest research / recommendations" questions without loading
-    // any personal plan data.
-    const bindGeneral = (llm) => tools.length > 0 ? llm.bindTools(tools) : llm;
+    const bindGeneral = (llm) => (tools.length > 0 ? llm.bindTools(tools) : llm);
     chain.push({
       label: "groq-70b",
       runner: bindGeneral(
@@ -115,54 +123,90 @@ function buildRunnerChain({ isGeneralPath, hasImage, enableSearch, tools }) {
     return chain;
   }
 
-// ── Personalized / tool path. Fallback chain order (as requested): ─────
-  //   1. Groq 70B (primary for complex text reasoning/tool-calling)
-  //   2. OpenRouter powerful FREE model (Nemotron 3 Super 120B)
-  //   3. Gemini 2.5 Flash (last resort for text; REQUIRED for images/files)
-  // The user explicitly wants Groq 70B for text and Gemini ONLY for
-  // files/images. Tools are SPLIT into flat single-purpose schemas (no nested
-  // `$ref`) so they are compatible across providers. If a candidate fails
-  // (rate-limit, schema `$ref` error, network, quota), the caller
-  // automatically tries the next model in the chain.
+  // Personalized / tool path: decide order based on tokenSize
+  const SMALL_TOKEN_THRESHOLD = 2000; // tokens
   const hasOpenRouterKey = Boolean(OPENROUTER_CONFIG.apiKey);
+  const hasNvidiaKey = Boolean(process.env.NVIDIA_API_KEY?.trim());
 
-  // 1. Groq 70B primary for text reasoning/tool-calling.
-  chain.push({
-    label: "groq-70b",
-    runner: bind(
-      createGroqLLM(true, {
-        model: process.env.GROQ_MAIN_MODEL?.trim() || "llama-3.3-70b-versatile",
-        temperature: 0.2,
-      })
-    ),
-    streaming: true,
-  });
+  const addIf = (cond, candidate) => cond && chain.push(candidate);
 
-  // 2. OpenRouter powerful free model (if API key configured).
-  if (hasOpenRouterKey) {
+  if (tokenSize <= SMALL_TOKEN_THRESHOLD) {
+    // Small context: prefer fast Groq
     chain.push({
-      label: "openrouter",
-      runner: bind(createOpenRouterLLM(true)),
+      label: "groq-70b",
+      runner: bind(
+        createGroqLLM(true, {
+          model: process.env.GROQ_MAIN_MODEL?.trim() || "llama-3.3-70b-versatile",
+          temperature: 0.2,
+        })
+      ),
       streaming: true,
     });
-    // Additional OpenRouter fallback models (skip the primary, already tried).
-    for (const fbModel of OPENROUTER_CONFIG.fallbackModels || []) {
-      if (fbModel !== OPENROUTER_CONFIG.model) {
-        chain.push({
-          label: `openrouter-${fbModel}`,
-          runner: bind(createOpenRouterModelLLM(fbModel)),
-          streaming: true,
-        });
+    addIf(hasNvidiaKey, {
+      label: "nvidia",
+      runner: bind(createNvidiaLLM(true)),
+      streaming: true,
+    });
+    chain.push({
+      label: "gemini-2.5-flash",
+      runner: bind(createStreamingLLM(true)),
+      streaming: true,
+    });
+    if (hasOpenRouterKey) {
+      chain.push({
+        label: "openrouter",
+        runner: bind(createOpenRouterLLM(true)),
+        streaming: true,
+      });
+      for (const fbModel of OPENROUTER_CONFIG.fallbackModels || []) {
+        if (fbModel !== OPENROUTER_CONFIG.model) {
+          chain.push({
+            label: `openrouter-${fbModel}`,
+            runner: bind(createOpenRouterModelLLM(fbModel)),
+            streaming: true,
+          });
+        }
+      }
+    }
+  } else {
+    // Large context: prioritize Gemini (larger context window), then Nvidia, then Groq, then OpenRouter
+    chain.push({
+      label: "gemini-2.5-flash",
+      runner: bind(createStreamingLLM(true)),
+      streaming: true,
+    });
+    addIf(hasNvidiaKey, {
+      label: "nvidia",
+      runner: bind(createNvidiaLLM(true)),
+      streaming: true,
+    });
+    chain.push({
+      label: "groq-70b",
+      runner: bind(
+        createGroqLLM(true, {
+          model: process.env.GROQ_MAIN_MODEL?.trim() || "llama-3.3-70b-versatile",
+          temperature: 0.2,
+        })
+      ),
+      streaming: true,
+    });
+    if (hasOpenRouterKey) {
+      chain.push({
+        label: "openrouter",
+        runner: bind(createOpenRouterLLM(true)),
+        streaming: true,
+      });
+      for (const fbModel of OPENROUTER_CONFIG.fallbackModels || []) {
+        if (fbModel !== OPENROUTER_CONFIG.model) {
+          chain.push({
+            label: `openrouter-${fbModel}`,
+            runner: bind(createOpenRouterModelLLM(fbModel)),
+            streaming: true,
+          });
+        }
       }
     }
   }
-
-// 3. Gemini 2.5 Flash (last resort for text; REQUIRED for images/files).
-  chain.push({
-    label: "gemini-2.5-flash",
-    runner: bind(createStreamingLLM(true)),
-    streaming: true,
-  });
 
   return chain;
 }
@@ -228,10 +272,11 @@ export async function llmNode(state) {
 // is available (personal tools are excluded by policies). On forceText or when
 // tools are disabled, bind no tools.
 const tools = forceText ? [] : createGraphTools(excludedTools);
-  const hasImage = hasImageContent(messages);
+const hasImage = hasImageContent(messages);
+const tokenSize = estimateTokens(messages);
 
   // ── Build the ordered fallback chain (highest quality → lowest). ──────
-  const chain = buildRunnerChain({ isGeneralPath, hasImage, enableSearch, tools });
+  const chain = buildRunnerChain({ isGeneralPath, hasImage, enableSearch, tools, tokenSize });
 
   console.log(
     `[Graph:llm] Invoking - ${tools.length} tools bound, ${messages.length} messages, ` +
