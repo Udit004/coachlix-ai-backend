@@ -26,8 +26,7 @@ function buildProfilePayload(user) {
     bio: user.bio,
     profileImage: user.profileImage,
     stats: user.stats,
-    achievements: user.achievements,
-    recentActivities: user.recentActivities,
+    dietaryPreference: user.dietaryPreference,
     profileCompleted: user.profileCompleted !== false,
     needsOnboarding:
       user.profileCompleted === false ||
@@ -151,6 +150,7 @@ export async function updateUserProfile(request, reply) {
           weight: body.weight,
           targetWeight: body.targetWeight,
           bio: body.bio,
+          dietaryPreference: body.dietaryPreference,
           profileCompleted: true,
           updatedAt: new Date()
         }
@@ -241,6 +241,42 @@ export async function deleteUserProfile(request, reply) {
     }
 
     return reply.code(200).send({ success: true, message: 'Profile deleted successfully' });
+  } catch (error) {
+    const statusCode = error.message === 'Authorization header missing' ? 401 : 500;
+    return reply.code(statusCode).send({
+      success: false,
+      error: statusCode === 401 ? 'Unauthorized' : 'Internal server error',
+      details: statusCode === 500 ? error.message : undefined
+    });
+  }
+}
+
+export async function getUserRecentActivities(request, reply) {
+  try {
+    const decodedToken = await getUserFromToken(request.headers.authorization || request.headers.Authorization || '');
+    const user = await User.findOne({ firebaseUid: decodedToken.uid }).select('recentActivities').lean();
+    if (!user) {
+      return reply.code(404).send({ success: false, error: 'User not found' });
+    }
+    return reply.code(200).send({ success: true, data: user.recentActivities || [] });
+  } catch (error) {
+    const statusCode = error.message === 'Authorization header missing' ? 401 : 500;
+    return reply.code(statusCode).send({
+      success: false,
+      error: statusCode === 401 ? 'Unauthorized' : 'Internal server error',
+      details: statusCode === 500 ? error.message : undefined
+    });
+  }
+}
+
+export async function getUserAchievements(request, reply) {
+  try {
+    const decodedToken = await getUserFromToken(request.headers.authorization || request.headers.Authorization || '');
+    const user = await User.findOne({ firebaseUid: decodedToken.uid }).select('achievements').lean();
+    if (!user) {
+      return reply.code(404).send({ success: false, error: 'User not found' });
+    }
+    return reply.code(200).send({ success: true, data: user.achievements || [] });
   } catch (error) {
     const statusCode = error.message === 'Authorization header missing' ? 401 : 500;
     return reply.code(statusCode).send({
