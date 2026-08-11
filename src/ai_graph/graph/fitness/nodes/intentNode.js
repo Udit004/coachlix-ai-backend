@@ -3,73 +3,195 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { QueryType } from "../../../reasoning/intentRouter.js";
 import { createGroqLLM } from "../../../config/llmconfig.js";
-import { LLM_CONFIG } from "../../../config/llmconfig.js";
 import {
   shouldEnableSearch,
   logSearchUsage,
 } from "../../../config/searchGrounding.js";
+import { buildClassifierContext } from "../../../memory/sessionMemory.js";
 
-const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are an AI fitness assistant. You classify the user's latest message into an intent. The user may write in ANY language (e.g. Hindi, Hinglish, Spanish, Tamil, French) and in ANY wording — classify by MEANING, never by keyword lists or literal phrasing.
+const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are an AI fitness assistant intent classifier for Coachlix. You classify the user's latest message into ONE fine-grained intent. The user may write in ANY language (e.g. Hindi, Hinglish, Spanish, Tamil, French) and in ANY wording — classify by MEANING, never by literal keyword matching.
 
-You will be given a conversation history followed by the user's latest message.
+You will be given:
+1. A session summary (earlier in this chat)
+2. Recent messages from this session
+3. The user's latest message
 
-Step 1: Classify the latest message into exactly one of:
+Use ALL of the above to classify correctly. especially if the current message is a short follow-up like "yes", "sure", "ok", "go ahead" — use the conversation history to decide what it refers to.
+
+CLASSIFY INTO EXACTLY ONE OF THESE INTENTS:
 - GREETING
-- GENERAL_QUERY
-- PERSONALIZED_QUERY
+- QUESTION_GENERAL
+- NUTRITION_INQUIRY
+- WORKOUT_INQUIRY
+- EXERCISE_TECHNIQUE
+- PLAN_REQUEST
+- PLAN_MODIFICATION
+- HEALTH_METRICS
+- PROGRESS_TRACKING
+- RECIPE_REQUEST
+- FOOD_COMPARISON
+- SUPPLEMENT_INQUIRY
+- MOTIVATION
+- QUESTION_SPECIFIC
 - OFF_TOPIC
 
-Step 2:
-- If GREETING -> respond naturally
-- If GENERAL_QUERY -> answer normally
-- If PERSONALIZED_QUERY -> DO NOT answer, instead mark needs_rag = true
-- If OFF_TOPIC -> mark intent = OFF_TOPIC and provide a polite refusal in 'response'
-
----
-
 RULES:
-- MEMORY RECALL (IMPORTANT): If the latest message asks about a PAST or RECENT conversation — e.g. "what were we talking about", "what did we discuss recently", "what we are discussing recently", "remind me what we talked about last time", "what have we done so far", "recall our last chat", "what is the last thing we discussed" — classify it as PERSONALIZED_QUERY with needs_rag = true. Answering it REQUIRES loading conversation history and long-term memory, so the general path MUST NOT be used. This applies even if the message is phrased casually or in another language.
-- COACHING / SKILL-LEARNING (IMPORTANT): If the user asks you to guide, coach, teach, or walk them through an exercise, movement, or skill (e.g. "guide me through the pull up", "teach me how to deadlift", "show me how to do a proper squat", "how do I do a push-up", "I want to learn pull-ups", "my goal is to master the bench press"), classify it as PERSONALIZED_QUERY with needs_rag = true. Tailored coaching REQUIRES the user's profile, experience level, fitness goal, and history, so the general path MUST NOT be used.
-- The latest message may reference something from the conversation history (e.g. "that plan", "my routine", "continue", "about that"). Use the provided history to decide: if it continues a personalized action, mark PERSONALIZED_QUERY.
-- If the latest message is a short reply/continuation ("yes", "sure", "ok", "go ahead", "no", "that's fine", "start", "let's begin", etc.) that answers the assistant's previous question, DO NOT treat it as a GREETING. Classify it as PERSONALIZED_QUERY (needs_rag = true) if it agrees to personalized actions (plans, metrics, coaching), or GENERAL_QUERY if it is a simple confirmation.
-- If unsure -> GENERAL_QUERY
-- OFF_TOPIC includes anything NOT related to fitness, health, nutrition, workout, or the Coachlix platform. Examples: coding, python, history, politics, general math (unless fitness related), etc.
-- Do NOT hallucinate user data
-- Keep responses concise and helpful
+- GREETING: short social openers (hi, hello, hey, good morning, etc.) without a real fitness question.
+- QUESTION_GENERAL: general fitness/health knowledge questions that do NOT depend on the user's own data. Examples: "what is protein", "how many calories in a banana", "benefits of HIIT", "what is BMI". These can be answered without loading the user's plans or profile.
+- NUTRITION_INQUIRY: factual nutrition questions about foods, macros, or general nutrition. Does NOT include requests to modify the user's diet plan.
+- WORKOUT_INQUIRY: factual workout/exercise questions. Does NOT include requests to modify the user's workout plan.
+- EXERCISE_TECHNIQUE: asking how to properly perform an exercise or movement. Example: "how do I do a squat", "proper form for deadlift".
+- PLAN_REQUEST: asking to CREATE a NEW diet plan, meal plan, workout plan, or fitness plan. Keywords: create, make, generate, build, design, start, new plan, custom plan.
+- PLAN_MODIFICATION: asking to CHANGE, UPDATE, MODIFY, REPLACE, REMOVE, or ADD something to an EXISTING plan. Examples: "change my lunch", "replace my dinner", "add eggs to my diet", "remove rice from my meal", "swap my workout", "update my plan", "I want to change my diet". This is DIFFERENT from PLAN_REQUEST.
+- HEALTH_METRICS: asking to calculate BMI, BMR, TDEE, maintenance calories, or similar metrics for the user.
+- PROGRESS_TRACKING: asking to log, track, or review progress, weight changes, or completed workouts.
+- RECIPE_REQUEST: asking for a recipe or cooking instructions.
+- FOOD_COMPARISON: comparing two foods or asking which is healthier/better.
+- SUPPLEMENT_INQUIRY: asking about supplements, protein powder, creatine, vitamins, etc.
+- MOTIVATION: expressing lack of motivation, asking for encouragement, or feeling demotivated.
+- QUESTION_SPECIFIC: asking about the user's OWN data, plans, meals, workouts, or history. Examples: "what is my diet plan", "show me my workout", "what should I eat today", "my progress", "tell me about my plan".
+- OFF_TOPIC: anything unrelated to fitness, health, nutrition, workouts, or Coachlix. Examples: coding, python, politics, movies, general math.
 
----
+CRITICAL DISTINCTIONS:
+- PLAN_REQUEST = CREATE something new. PLAN_MODIFICATION = CHANGE something existing.
+- "create a diet plan" -> PLAN_REQUEST
+- "change my diet plan" -> PLAN_MODIFICATION
+- "add chicken to my lunch" -> PLAN_MODIFICATION (modifying existing plan)
+- "give me a recipe for chicken" -> RECIPE_REQUEST
+- "how many calories in chicken" -> NUTRITION_INQUIRY
+- "what should I eat today" -> QUESTION_SPECIFIC (needs user's plan)
+- "what is protein" -> QUESTION_GENERAL (general knowledge)
+- "guide me through pull-ups" -> EXERCISE_TECHNIQUE (coaching requires profile + goal context)
+
+PREFERENCE CHANGE DETECTION (IMPORTANT):
+- If the user explicitly states a NEW dietary preference that CONTRADICTS or REPLACES a previous one, set "preference_change": { "detected": true, "new_preference": "<the new preference>" }.
+- Examples: "I'm now vegan" (was vegetarian), "I used to be vegetarian but now I'm vegan", "I'm no longer vegetarian", "I've switched to keto".
+- Only set this when the message CLEARLY indicates a preference change, not just stating a preference for the first time.
+- If no preference change is detected, set "preference_change": { "detected": false, "new_preference": null }.
+
+MEMORY RECALL (IMPORTANT):
+- If the user asks about PAST conversations, memory, or what was discussed recently, classify as QUESTION_SPECIFIC. Examples: "what did we discuss", "remind me what we talked about", "what were we talking about", "recall our last chat".
+
+COACHING / SKILL-LEARNING:
+- If the user asks to be guided, taught, or coached through an exercise/skill, classify as EXERCISE_TECHNIQUE.
+
+SHORT FOLLOW-UPS:
+- Short replies like "yes", "sure", "ok", "go ahead" that continue a prior personalized conversation should be QUESTION_SPECIFIC.
 
 OUTPUT FORMAT (STRICT JSON):
-
 {
   "intent": "...",
   "confidence": 0-1,
   "needs_rag": true/false,
-  "response": "string (empty if needs_rag = true)"
+  "data_needs": {
+    "needs_profile": true/false,
+    "needs_diet": true/false,
+    "needs_workout": true/false,
+    "needs_history": true/false,
+    "needs_vector_search": true/false,
+    "priority": "low"|"medium"|"high"
+  },
+  "preference_change": {
+    "detected": true/false,
+    "new_preference": "string or null"
+  },
+  "response": "string (empty if needs_rag = true or for non-greeting/off-topic intents)"
 }`;
 
+const ALLOWED_INTENTS = new Set([
+  "GREETING",
+  "QUESTION_GENERAL",
+  "NUTRITION_INQUIRY",
+  "WORKOUT_INQUIRY",
+  "EXERCISE_TECHNIQUE",
+  "PLAN_REQUEST",
+  "PLAN_MODIFICATION",
+  "HEALTH_METRICS",
+  "PROGRESS_TRACKING",
+  "RECIPE_REQUEST",
+  "FOOD_COMPARISON",
+  "SUPPLEMENT_INQUIRY",
+  "MOTIVATION",
+  "QUESTION_SPECIFIC",
+  "OFF_TOPIC",
+]);
+
+const INTENT_NAME_MAP = {
+  GREETING: "greeting",
+  QUESTION_GENERAL: "question_general",
+  NUTRITION_INQUIRY: "nutrition_inquiry",
+  WORKOUT_INQUIRY: "workout_inquiry",
+  EXERCISE_TECHNIQUE: "exercise_technique",
+  PLAN_REQUEST: "plan_request",
+  PLAN_MODIFICATION: "plan_modification",
+  HEALTH_METRICS: "health_metrics",
+  PROGRESS_TRACKING: "progress_tracking",
+  RECIPE_REQUEST: "recipe_request",
+  FOOD_COMPARISON: "food_comparison",
+  SUPPLEMENT_INQUIRY: "supplement_inquiry",
+  MOTIVATION: "motivation",
+  QUESTION_SPECIFIC: "question_specific",
+  OFF_TOPIC: "off_topic",
+};
+
+const DEFAULT_DATA_NEEDS = {
+  needsProfile: false,
+  needsDiet: false,
+  needsWorkout: false,
+  needsHistory: false,
+  needsVectorSearch: false,
+  priority: "low",
+};
+
+function normalizeDataNeeds(raw) {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_DATA_NEEDS };
+
+  const safe = (value, fallback) => {
+    const type = typeof value;
+    if (type === "boolean") return value;
+    if (type === "number") return value !== 0;
+    if (type === "string") return ["true", "1", "yes", "on"].includes(value.trim().toLowerCase());
+    return fallback;
+  };
+
+  return {
+    needsProfile: safe(raw.needs_profile, DEFAULT_DATA_NEEDS.needsProfile),
+    needsDiet: safe(raw.needs_diet, DEFAULT_DATA_NEEDS.needsDiet),
+    needsWorkout: safe(raw.needs_workout, DEFAULT_DATA_NEEDS.needsWorkout),
+    needsHistory: safe(raw.needs_history, DEFAULT_DATA_NEEDS.needsHistory),
+    needsVectorSearch: safe(raw.needs_vector_search, DEFAULT_DATA_NEEDS.needsVectorSearch),
+    priority: ["low", "medium", "high"].includes(String(raw.priority || "").toLowerCase())
+      ? String(raw.priority).toLowerCase()
+      : DEFAULT_DATA_NEEDS.priority,
+  };
+}
+
+function normalizePreferenceChange(raw) {
+  if (!raw || typeof raw !== "object") {
+    return { detected: false, newPreference: null };
+  }
+
+  const detected = Boolean(raw.detected);
+  const newPreference = typeof raw.new_preference === "string" ? raw.new_preference.trim() : null;
+
+  return {
+    detected,
+    newPreference: detected ? newPreference : null,
+  };
+}
+
 const FALLBACK_RESULT = {
-  intent: "GENERAL_QUERY",
+  intent: "QUESTION_GENERAL",
   confidence: 0.51,
   needs_rag: false,
+  data_needs: { ...DEFAULT_DATA_NEEDS, priority: "low" },
+  preference_change: { detected: false, new_preference: null },
   response: "",
 };
 
 const QUICK_GREETING_PATTERN =
   /^(hi|hello|hey|hii+|heyy+|yo|sup|hola|namaste|good\s+(morning|afternoon|evening|night))[\s!.?]*$/i;
 const CLASSIFIER_TIMEOUT_MS = Number(process.env.INTENT_CLASSIFIER_TIMEOUT_MS || 3500);
-
-const PLAN_REFERENCE_PATTERN =
-  /\b(my|current)\s+(diet|meal|workout|training|fitness)\s+plan\b/i;
-const PERSONAL_CHECK_PATTERN =
-  /\b(check|show|see|does|do|is|what(?:'s| is)|tell)\b/i;
-const PERSONAL_PRONOUN_PATTERN = /\b(my|for me|mine)\b/i;
-const SIMPLE_GENERAL_LEAD_PATTERN =
-  /^(what is|what's|what are|who is|who are|define|meaning of|benefits of|benefit of|how much|how many|is|are)\b/i;
-const SIMPLE_GENERAL_TOPIC_PATTERN =
-  /\b(protein|calorie|calories|bmi|hydration|water|steps|sleep|soreness|muscle|fat|carb|carbs|exercise|workout)\b/i;
-const COMPLEX_GENERAL_PATTERN =
-  /\b(compare|comparison|difference|versus|vs\.?|better than|best for me|recommend|suggest|custom|personaliz|plan|routine|program|schedule|design|build|create|optimize|should i|can i|how should i|what should i|for my|my plan|my workout|my diet)\b/i;
 
 function extractJsonBlock(text) {
   if (typeof text !== "string" || text.trim().length === 0) {
@@ -100,13 +222,9 @@ function parseClassifierOutput(raw) {
   try {
     const parsed = JSON.parse(jsonText);
     const normalizedIntent = String(parsed.intent || "").trim().toUpperCase();
-    const intent =
-      normalizedIntent === "GREETING" ||
-      normalizedIntent === "GENERAL_QUERY" ||
-      normalizedIntent === "PERSONALIZED_QUERY" ||
-      normalizedIntent === "OFF_TOPIC"
-        ? normalizedIntent
-        : "GENERAL_QUERY";
+    const intent = ALLOWED_INTENTS.has(normalizedIntent)
+      ? normalizedIntent
+      : "QUESTION_GENERAL";
 
     const confidence = Number(parsed.confidence);
     const safeConfidence = Number.isFinite(confidence)
@@ -119,7 +237,9 @@ function parseClassifierOutput(raw) {
     return {
       intent,
       confidence: safeConfidence,
-      needs_rag: intent === "PERSONALIZED_QUERY" ? true : needsRag,
+      needs_rag: needsRag,
+      data_needs: normalizeDataNeeds(parsed.data_needs),
+      preference_change: normalizePreferenceChange(parsed.preference_change),
       response,
     };
   } catch {
@@ -129,10 +249,6 @@ function parseClassifierOutput(raw) {
 
 function buildDataNeeds(intentName, originalMessage, directAnswerable = false) {
   const lower = (originalMessage || "").toLowerCase();
-  const needsDiet = /\b(diet|meal|food|nutrition|calorie|protein|carb|fat)\b/i.test(lower);
-  const needsWorkout = /\b(workout|exercise|training|gym|strength|cardio|routine)\b/i.test(
-    lower
-  );
 
   if (intentName === "greeting" || intentName === "off_topic") {
     return {
@@ -156,36 +272,95 @@ function buildDataNeeds(intentName, originalMessage, directAnswerable = false) {
     };
   }
 
+  if (intentName === "plan_modification") {
+    return {
+      needsProfile: true,
+      needsDiet: /\b(diet|meal|food|nutrition)\b/i.test(lower),
+      needsWorkout: /\b(workout|exercise|training|gym)\b/i.test(lower),
+      needsHistory: true,
+      needsVectorSearch: true,
+      priority: "high",
+    };
+  }
+
+  if (intentName === "health_metrics") {
+    return {
+      needsProfile: true,
+      needsDiet: false,
+      needsWorkout: false,
+      needsHistory: false,
+      needsVectorSearch: false,
+      priority: "high",
+    };
+  }
+
+  if (intentName === "motivation") {
+    return {
+      needsProfile: true,
+      needsDiet: false,
+      needsWorkout: false,
+      needsHistory: true,
+      needsVectorSearch: false,
+      priority: "medium",
+    };
+  }
+
+  if (intentName === "recipe_request" || intentName === "food_comparison" || intentName === "supplement_inquiry") {
+    return {
+      needsProfile: true,
+      needsDiet: intentName === "food_comparison",
+      needsWorkout: false,
+      needsHistory: false,
+      needsVectorSearch: true,
+      priority: "medium",
+    };
+  }
+
+  if (intentName === "exercise_technique") {
+    return {
+      needsProfile: true,
+      needsDiet: false,
+      needsWorkout: true,
+      needsHistory: true,
+      needsVectorSearch: true,
+      priority: "high",
+    };
+  }
+
+  if (intentName === "progress_tracking") {
+    return {
+      needsProfile: true,
+      needsDiet: true,
+      needsWorkout: true,
+      needsHistory: true,
+      needsVectorSearch: true,
+      priority: "medium",
+    };
+  }
+
+  if (intentName === "nutrition_inquiry" || intentName === "workout_inquiry") {
+    return {
+      needsProfile: true,
+      needsDiet: intentName === "nutrition_inquiry",
+      needsWorkout: intentName === "workout_inquiry",
+      needsHistory: false,
+      needsVectorSearch: true,
+      priority: "medium",
+    };
+  }
+
+  // question_specific, plan_request, and anything else personalized
   return {
     needsProfile: true,
-    needsDiet,
-    needsWorkout,
+    needsDiet: /\b(diet|meal|food|nutrition|calorie|protein)\b/i.test(lower),
+    needsWorkout: /\b(workout|exercise|training|gym|routine)\b/i.test(lower),
     needsHistory: true,
     needsVectorSearch: true,
     priority: "high",
   };
 }
 
-function formatHistoryForClassifier(conversationHistory) {
-  if (!Array.isArray(conversationHistory) || conversationHistory.length === 0) {
-    return "";
-  }
-
-  // Take the last 6 turns (3 user + 3 ai) to give the classifier enough
-  // context to resolve memory-recall queries ("what we discussed recently")
-  // and short follow-up replies like "yes" / "sure". Each message is capped
-  // to keep tokens low.
-  const recent = conversationHistory.slice(-6);
-  return recent
-    .map((msg) => {
-      const role = msg.role === "user" ? "User" : "Assistant";
-      const content = String(msg.content || "").slice(0, 300);
-      return `${role}: ${content}`;
-    })
-    .join("\n");
-}
-
-async function classifyWithSmallLlm(originalMessage, conversationHistory = []) {
+async function classifyWithSmallLlm(originalMessage, classifierContext) {
   const classifierLlm = createGroqLLM(false, {
     model:
       process.env.GROQ_INTENT_MODEL?.trim() ||
@@ -195,14 +370,9 @@ async function classifyWithSmallLlm(originalMessage, conversationHistory = []) {
     maxRetries: 1,
   });
 
-  const historyText = formatHistoryForClassifier(conversationHistory);
-  const userInput = historyText
-    ? `CONVERSATION HISTORY:\n${historyText}\n\nLATEST USER MESSAGE:\n${originalMessage || ""}`
-    : originalMessage || "";
-
   const output = await classifierLlm.invoke([
     new SystemMessage(INTENT_CLASSIFIER_SYSTEM_PROMPT),
-    new HumanMessage(userInput),
+    new HumanMessage(classifierContext || originalMessage || ""),
   ]);
 
   const rawText =
@@ -231,38 +401,6 @@ function withTimeout(promise, timeoutMs) {
   });
 }
 
-function shouldForcePersonalizedQuery(message) {
-  const text = (message || "").trim();
-  if (!text) return false;
-
-  // Queries about the user's own current plan must use RAG/tools.
-  if (PLAN_REFERENCE_PATTERN.test(text)) {
-    return true;
-  }
-
-  const asksForCheck = PERSONAL_CHECK_PATTERN.test(text);
-  const hasPersonalOwnership = PERSONAL_PRONOUN_PATTERN.test(text);
-  const mentionsPlan = /\b(plan|diet|workout|meal|schedule)\b/i.test(text);
-
-  return asksForCheck && hasPersonalOwnership && mentionsPlan;
-}
-
-function shouldDirectAnswerGeneralQuery(message) {
-  const text = (message || "").trim();
-  if (!text) return false;
-
-  const lower = text.toLowerCase();
-  const wordCount = lower.split(/\s+/).filter(Boolean).length;
-
-  if (wordCount > 14) return false;
-
-  return (
-    SIMPLE_GENERAL_LEAD_PATTERN.test(text) &&
-    SIMPLE_GENERAL_TOPIC_PATTERN.test(text) &&
-    !COMPLEX_GENERAL_PATTERN.test(text)
-  );
-}
-
 const emitEvent = (state, type, payload) => {
   if (typeof state?.onEvent === "function") {
     try {
@@ -273,268 +411,12 @@ const emitEvent = (state, type, payload) => {
   }
 };
 
-// Queries that ask the assistant to recall past conversation / memory. These
-// MUST go through the personalized path so long-term memory and history are
-// loaded and injected; otherwise the LLM truthfully says "I have no memory".
-// The alternatives are intentionally broad to tolerate word order variations:
-//   - explicit "recall"/"remember"
-//   - question verb + subject + past-action (what have we done / what did we
-//     discuss / what we have talked about / tell me what we worked on)
-//   - temporal marker + memory noun (recent/previous/past ... conversation)
-const RECALL_QUERY_PATTERN =
-  /\b(recall|remember)\b|\b(what|tell|show|summarize)\b.*\b(we|you|our)\b.*\b(done|do|doing|discuss(?:ed|ing)?|talk(?:ed|ing)?|chat(?:ted|ting)?|work(?:ed|ing)?|cover(?:ed|ing)?|been|said|spoke|speaking|talking|going|having|had)\b|\b(recent|previous|past|earlier|before|lately|last)\b.*\b(conversation|chat|memory|discussion|talk|history|time|session|topic|thing|things)\b/i;
-
-// Short affirmation / follow-up replies that usually continue a prior
-// assistant offer (e.g. "Would you like me to build your plan?" -> "yes").
-const AFFIRMATION_PATTERN =
-  /^(yes|yeah|yep|yup|sure|ok|okay|okayy?|alright|fine|go\s*ahead|please\s*(do|go)|let'?s\s*(do|go|start|begin)|do\s*it|start|begin|absolutely|definitely|sounds\s*good|that'?s?\s*(good|fine|great)|correct|right|hmm\s*yes)[\s!.?]*$/i;
-const DECLINE_PATTERN =
-  /^(no|nope|nah|not\s*now|no\s*thanks|not\s*really|maybe\s*later|skip|later)[\s!.?]*$/i;
-const GOAL_REQUEST_PATTERN =
-  /\b(create|build|make|start|set up|design|prepare|give me|help me create)\b.*\b(diet|meal|nutrition|workout|training|fitness|goal|plan|routine|schedule)\b|\b(i want to|i need to|my goal is|i am trying to|my aim is|i\'?d like to)\b.*\b(lose weight|gain muscle|build muscle|eat better|get fit|improve fitness|learn|master|get better|start|begin)\b/i;
-
-// Coaching / skill-learning requests that MUST reach the goal-aware
-// (personalized) path: the assistant needs the user's profile, experience
-// level, fitness goal, and long-term memory to tailor the coaching. Examples:
-//   - "guide me through the pull up exercise"
-//   - "teach me how to do a proper deadlift"
-//   - "my goal is to learn this exercise"
-//   - "how do I do a handstand push-up for a beginner"
-// These bypass the LLM classifier (cheap regex) and go straight to
-// retrieveContext -> goalNode -> turn plan.
-const COACHING_REQUEST_PATTERN =
-  /\b(guide|coach|teach|train|help)\s+me\b|\b(show|tell)\s+me\s+how\b|\bhow\s+do\s+i\b|\bhow\s+to\s+(do|perform|improve|master|learn)\b|\b(learn|master|practice|improve|perfect)\s+(the|this|my)?\s*(exercise|movement|skill|form|technique|pull.?up|push.?up|squat|deadlift|bench|lunge|plank|dip|row|curl)\b|\bmy\s+goal\s+is\s+to\s+(learn|master|improve|get\s+better\s+at|perfect)\b/i;
-const GOAL_FOLLOW_UP_TOPIC_PATTERN =
-  /\b(vegetarian|vegan|non[\s-]?vegetarian|jain|home|gym|days? a week|kg|kgs|lb|lbs|pounds|lose|gain|weight|target)\b/i;
-
-function containsFollowUpTopic(message) {
-  const text = (message || "").toLowerCase();
-  return /\b(health|bmi|metric|metric(s)?|diet|meal|food|workout|exercise|plan|target|calorie|protein|fat|weight|train|goal)\b/i.test(
-    text
-  ) || /\b(yes|yeah|sure|ok|okay|go ahead|let'?s|start|begin|do it)\b/i.test(text);
-}
-
-function isGoalFollowUp(message, conversationHistory = []) {
-  const text = (message || "").trim();
-  if (!text || text.length > 120 || !GOAL_FOLLOW_UP_TOPIC_PATTERN.test(text)) {
-    return false;
-  }
-
-  const lastAssistant = [...conversationHistory]
-    .reverse()
-    .find((m) => m.role === "ai" || m.role === "assistant");
-  const lastAssistantText = String(lastAssistant?.content || "").toLowerCase();
-
-  const wasAskingGoalQuestion =
-    /\?/.test(lastAssistantText) &&
-    /\b(goal|diet|meal|nutrition|workout|training|plan|weight|target|preference|days|gym|home)\b/i.test(
-      lastAssistantText
-    );
-
-  return wasAskingGoalQuestion;
-}
-
 export async function intentNode(state) {
   const { originalMessage, userId, conversationHistory = [] } = state;
   const t0 = Date.now();
-
-  // Fast-path affirmation: if the user gives a short confirmation/continuation
-  // and there is preceding assistant context offering a personalized action,
-  // route it to the personalized path WITHOUT an LLM classifier call.
-  const hasHistory = Array.isArray(conversationHistory) && conversationHistory.length > 0;
   const trimmed = (originalMessage || "").trim();
 
-  if (hasHistory && AFFIRMATION_PATTERN.test(trimmed)) {
-    const lastAssistant = [...conversationHistory]
-      .reverse()
-      .find((m) => m.role === "ai" || m.role === "assistant");
-    const lastAssistantText = String(lastAssistant?.content || "").toLowerCase();
-
-    const offersPersonalizedAction =
-      /\b(calculate|build|create|start|set up|make|generate|proceed with|lets?|let'?s)\b/i.test(
-        lastAssistantText
-      ) &&
-      /\b(health|bmi|metric|diet|meal|plan|workout|exercise|target|calorie|protein|goal|coach)\b/i.test(
-        lastAssistantText
-      );
-
-    if (offersPersonalizedAction || containsFollowUpTopic(originalMessage)) {
-      const result = {
-        intent: "question_specific",
-        confidence: 0.9,
-        requiresData: true,
-        dataNeeds: {
-          needsProfile: true,
-          needsDiet: true,
-          needsWorkout: true,
-          needsHistory: true,
-          needsVectorSearch: true,
-          priority: "high",
-        },
-        classifierIntent: "PERSONALIZED_QUERY",
-        classifierResponse: "",
-        version: "llm-small-v1-affirmation-fastpath",
-      };
-
-      console.log(
-        "[Graph:intent] Affirmation fast-path -> question_specific (continuing prior assistant offer)"
-      );
-
-      emitEvent(state, "ai.intent.classified", {
-        userId,
-        intent: "question_specific",
-        confidence: 0.9,
-        requiresData: true,
-        classifierIntent: "PERSONALIZED_QUERY",
-        fastPath: true,
-        followUp: true,
-      });
-
-      return {
-        intent: result,
-        queryType: QueryType.PERSONALIZED_FITNESS,
-        needsRag: true,
-        greetingResponse: "",
-        enableSearch: false,
-        flowMetrics: { intentClassificationTime: Date.now() - t0 },
-      };
-    }
-  }
-
-// Fast-path coaching / skill-learning: coaching the user on an exercise,
-  // form, or skill requires their profile, experience level, and long-term
-  // memory to tailor the guidance. Route straight to the personalized path
-  // (retrieveContext -> goalNode -> turn plan) — no LLM classifier call.
-  if (COACHING_REQUEST_PATTERN.test(trimmed)) {
-    const result = {
-      intent: "question_specific",
-      confidence: 0.95,
-      requiresData: true,
-      dataNeeds: {
-        needsProfile: true,
-        needsDiet: /\b(diet|meal|nutrition|food)\b/i.test(trimmed),
-        needsWorkout: true,
-        needsHistory: true,
-        needsVectorSearch: true,
-        priority: "high",
-      },
-      classifierIntent: "PERSONALIZED_QUERY",
-      classifierResponse: "",
-      version: "llm-small-v1-coaching-fastpath",
-    };
-
-    console.log(
-      "[Graph:intent] Coaching fast-path -> question_specific (exercise/skill-learning requires profile + goal context)"
-    );
-
-    emitEvent(state, "ai.intent.classified", {
-      userId,
-      intent: "question_specific",
-      confidence: 0.95,
-      requiresData: true,
-      classifierIntent: "PERSONALIZED_QUERY",
-      fastPath: true,
-      coachingRequest: true,
-    });
-
-    return {
-      intent: result,
-      queryType: QueryType.PERSONALIZED_FITNESS,
-      needsRag: true,
-      greetingResponse: "",
-      enableSearch: false,
-      flowMetrics: { intentClassificationTime: Date.now() - t0 },
-    };
-  }
-
-  if (GOAL_REQUEST_PATTERN.test(trimmed) || isGoalFollowUp(trimmed, conversationHistory)) {
-    const result = {
-      intent: "question_specific",
-      confidence: 0.93,
-      requiresData: true,
-      dataNeeds: {
-        needsProfile: true,
-        needsDiet: /\b(diet|meal|nutrition)\b/i.test(trimmed),
-        needsWorkout: /\b(workout|training|gym|routine)\b/i.test(trimmed),
-        needsHistory: true,
-        needsVectorSearch: true,
-        priority: "high",
-      },
-      classifierIntent: "PERSONALIZED_QUERY",
-      classifierResponse: "",
-      version: "llm-small-v1-goal-fastpath",
-    };
-
-    emitEvent(state, "ai.intent.classified", {
-      userId,
-      intent: "question_specific",
-      confidence: result.confidence,
-      requiresData: true,
-      classifierIntent: "PERSONALIZED_QUERY",
-      fastPath: true,
-      goalRequest: true,
-    });
-
-    return {
-      intent: result,
-      queryType: QueryType.PERSONALIZED_FITNESS,
-      needsRag: true,
-      greetingResponse: "",
-      enableSearch: false,
-      flowMetrics: { intentClassificationTime: Date.now() - t0 },
-    };
-  }
-
-// Fast-path memory recall: when the user asks the assistant to recall past
-  // conversation/memory, ALWAYS route to the personalized path so long-term
-  // memory and history get loaded and injected. Bypasses the LLM classifier
-  // (saves a call) and avoids the general path that strips memory.
-  if (RECALL_QUERY_PATTERN.test(trimmed)) {
-    const recallResult = {
-      intent: "question_specific",
-      confidence: 0.92,
-      requiresData: true,
-      dataNeeds: {
-        needsProfile: true,
-        needsDiet: false,
-        needsWorkout: false,
-        needsHistory: true,
-        needsVectorSearch: true,
-        priority: "high",
-      },
-      classifierIntent: "PERSONALIZED_QUERY",
-      classifierResponse: "",
-      version: "llm-small-v1-recall-fastpath",
-    };
-
-    console.log(
-      "[Graph:intent] Recall fast-path -> question_specific (loading long-term memory + history)"
-    );
-
-    emitEvent(state, "ai.intent.classified", {
-      userId,
-      intent: "question_specific",
-      confidence: 0.92,
-      requiresData: true,
-      classifierIntent: "PERSONALIZED_QUERY",
-      fastPath: true,
-      memoryRecall: true,
-    });
-
-    return {
-      intent: recallResult,
-      queryType: QueryType.PERSONALIZED_FITNESS,
-      needsRag: true,
-      greetingResponse: "",
-      enableSearch: false,
-      flowMetrics: { intentClassificationTime: Date.now() - t0 },
-    };
-  }
-
-  // Ensure a bare greeting is NOT fast-pathed when it's actually a follow-up
-  // confirmation (e.g. user starts with "hi" then continues; only treat as
-  // greeting when there is no meaningful prior context).
-  if (QUICK_GREETING_PATTERN.test(trimmed) && !hasHistory) {
+  if (QUICK_GREETING_PATTERN.test(trimmed)) {
     const quickResult = {
       intent: "greeting",
       confidence: 0.99,
@@ -542,7 +424,7 @@ export async function intentNode(state) {
       dataNeeds: buildDataNeeds("greeting", originalMessage),
       classifierIntent: "GREETING",
       classifierResponse: "",
-      version: "llm-small-v1-fastpath",
+      version: "llm-small-v2-fastpath",
     };
 
     console.log("[Graph:intent] Fast-path greeting detected");
@@ -566,83 +448,57 @@ export async function intentNode(state) {
     };
   }
 
-let classifierResult;
+  const classifierContext = await buildClassifierContext(userId, state.sessionId, originalMessage);
 
+  let classifierResult;
   try {
     classifierResult = await withTimeout(
-      classifyWithSmallLlm(originalMessage, conversationHistory),
+      classifyWithSmallLlm(originalMessage, classifierContext),
       CLASSIFIER_TIMEOUT_MS
     );
   } catch (error) {
     console.warn(
-      `[Graph:intent] Small-LLM classifier failed, falling back to GENERAL_QUERY: ${error.message}`
+      `[Graph:intent] Small-LLM classifier failed, falling back to QUESTION_GENERAL: ${error.message}`
     );
     classifierResult = FALLBACK_RESULT;
   }
 
-  // Post-LLM safety overrides:
-  //  1. Personalized plans/metrics phrasing ("show my plan") -> personalized.
-  //  2. Memory-recall phrasing ("what did we discuss recently") -> personalized
-  //     so history + long-term memory are loaded. The LLM classifier should
-  //     catch these, but this regex is a safety net for any missed phrasing.
-  //  3. Coaching / skill-learning phrasing -> personalized (needs profile +
-  //     experience + goal context to tailor guidance).
-  const forcedPersonalized =
-    shouldForcePersonalizedQuery(originalMessage) ||
-    RECALL_QUERY_PATTERN.test(trimmed) ||
-    COACHING_REQUEST_PATTERN.test(trimmed);
-  if (forcedPersonalized && classifierResult.intent !== "PERSONALIZED_QUERY") {
-    classifierResult = {
-      ...classifierResult,
-      intent: "PERSONALIZED_QUERY",
-      needs_rag: true,
-      response: "",
-      confidence: Math.max(classifierResult.confidence, 0.75),
-    };
-  }
-
-  const intentName =
-    classifierResult.intent === "GREETING"
-      ? "greeting"
-      : classifierResult.intent === "PERSONALIZED_QUERY"
-        ? "question_specific"
-        : classifierResult.intent === "OFF_TOPIC"
-          ? "off_topic"
-          : "question_general";
+  const intentName = INTENT_NAME_MAP[classifierResult.intent] || "question_general";
 
   const queryType =
-    classifierResult.intent === "GREETING"
+    intentName === "greeting"
       ? QueryType.GREETING
-      : classifierResult.intent === "PERSONALIZED_QUERY"
-        ? QueryType.PERSONALIZED_FITNESS
-        : classifierResult.intent === "OFF_TOPIC"
-          ? QueryType.OFF_TOPIC
-          : QueryType.GENERAL_FITNESS;
+      : intentName === "off_topic"
+        ? QueryType.OFF_TOPIC
+        : intentName === "question_general"
+          ? QueryType.GENERAL_FITNESS
+          : QueryType.PERSONALIZED_FITNESS;
+
+  const directAnswerable =
+    intentName === "question_general" &&
+    !classifierResult.needs_rag &&
+    Boolean(classifierResult.response) &&
+    false;
+
+  const llmDataNeeds = classifierResult.data_needs
+    ? normalizeDataNeeds(classifierResult.data_needs)
+    : null;
+  const dataNeeds = llmDataNeeds || buildDataNeeds(intentName, originalMessage, directAnswerable);
 
   const intent = {
     intent: intentName,
     confidence: classifierResult.confidence,
     requiresData: classifierResult.needs_rag,
-    directAnswerable:
-      intentName === "question_general" &&
-      !classifierResult.needs_rag &&
-      Boolean(classifierResult.response) &&
-      shouldDirectAnswerGeneralQuery(originalMessage),
-    dataNeeds: buildDataNeeds(
-      intentName,
-      originalMessage,
-      intentName === "question_general" &&
-        !classifierResult.needs_rag &&
-        Boolean(classifierResult.response) &&
-        shouldDirectAnswerGeneralQuery(originalMessage)
-    ),
+    directAnswerable,
+    dataNeeds,
     classifierIntent: classifierResult.intent,
     classifierResponse: classifierResult.response,
-    version: "llm-small-v1",
+    preferenceChange: classifierResult.preference_change || { detected: false, newPreference: null },
+    version: "llm-small-v2",
   };
 
   const enableSearch = shouldEnableSearch(intent, originalMessage);
-  logSearchUsage(state.userId, intent, enableSearch);
+  logSearchUsage(userId, intent, enableSearch);
 
   emitEvent(state, "ai.intent.classified", {
     userId,
@@ -652,8 +508,8 @@ let classifierResult;
     classifierIntent: intent.classifierIntent,
     queryType: String(queryType),
     enableSearch,
-    forcedPersonalized,
     priority: intent.dataNeeds?.priority,
+    preferenceChange: intent.preferenceChange,
   });
 
   console.log(
@@ -661,9 +517,8 @@ let classifierResult;
       `(${(intent.confidence * 100).toFixed(0)}%) ` +
       `queryType=${queryType} ` +
       `needsRag=${classifierResult.needs_rag} ` +
-      `directAnswerable=${intent.directAnswerable} ` +
-      `forcedPersonalized=${forcedPersonalized} ` +
       `priority=${intent.dataNeeds?.priority} ` +
+      `preferenceChange=${JSON.stringify(intent.preferenceChange)} ` +
       `search=${enableSearch}`
   );
 

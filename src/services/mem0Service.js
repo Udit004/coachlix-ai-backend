@@ -1,6 +1,7 @@
 import { MemoryClient } from 'mem0ai';
 
 import { env } from '../config/env.js';
+import { cache } from '../lib/redis.js';
 
 let mem0Client = null;
 
@@ -89,6 +90,14 @@ function buildProfile(memories = []) {
   };
 }
 
+function memorySearchCacheKey(userId, query, topK) {
+  return `mem0:search:${userId}:${topK}:${query.trim().toLowerCase()}`;
+}
+
+function memoryProfileCacheKey(userId) {
+  return `mem0:profile:${userId}`;
+}
+
 export async function addTurnMemories(userId, messages, metadata = {}) {
   const client = await getMem0Client();
   if (!client || !userId) {
@@ -102,7 +111,7 @@ export async function addTurnMemories(userId, messages, metadata = {}) {
 
   try {
     const results = await client.add(normalized, {
-      userId,
+      filters: { user_id: userId },
       metadata,
     });
 
@@ -121,18 +130,31 @@ export async function searchMemories(userId, query, topK = 5) {
     return { results: [], source: 'none', provider: 'mem0' };
   }
 
+  const trimmedQuery = String(query).trim();
+  const cacheKey = memorySearchCacheKey(userId, trimmedQuery, topK);
+  const cached = await cache.get(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      cacheHit: true,
+    };
+  }
+
   try {
-    const response = await client.search(query, {
+    const response = await client.search(trimmedQuery, {
       topK,
-      userId,
+      filters: { user_id: userId },
     });
 
-    return {
+    const result = {
       results: (response?.results || []).map(mapMemory),
       source: 'mem0',
       provider: 'mem0',
       cacheHit: false,
     };
+
+    await cache.set(cacheKey, result, 300);
+    return result;
   } catch (error) {
     console.error('[Mem0] searchMemories failed:', error?.message || error);
     return {
@@ -150,15 +172,23 @@ export async function getUserMemories(userId, pageSize = 12) {
     return [];
   }
 
+  const cacheKey = memoryProfileCacheKey(userId);
+  const cached = await cache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   try {
     const response = await client.getAll({
       page: 1,
       pageSize,
       latestOnly: true,
-      userId,
+      filters: { user_id: userId },
     });
 
-    return (response?.results || []).map(mapMemory);
+    const memories = (response?.results || []).map(mapMemory);
+    await cache.set(cacheKey, memories, 1800);
+    return memories;
   } catch (error) {
     console.error('[Mem0] getUserMemories failed:', error?.message || error);
     return [];
@@ -194,6 +224,44 @@ export async function buildMem0Context(userId, query, topK = 5) {
   };
 }
 
+export async function updateMemoriesForPreference(userId, oldPreference, newPreference) {
+  const client = await getMem0Client();
+  if (!client || !userId || !oldPreference || !newPreference) {
+    return { updated: 0 };
+  }
+
+  try {
+    const searchResult = await client.search(oldPreference, {
+      topK: 5,
+      filters: { user_id: userId },
+    });
+
+    const memories = searchResult?.results || [];
+    const matches = memories.filter((m) =>
+      (m.memory || m.data?.memory || '').toLowerCase().includes(oldPreference.toLowerCase())
+    );
+
+    let updated = 0;
+    for (const memory of matches) {
+      try {
+        const oldText = memory.memory || memory.data?.memory || '';
+        const updatedText = oldText.replace(new RegExp(oldPreference, 'gi'), newPreference);
+        if (updatedText !== oldText) {
+          await client.update(memory.id, { text: updatedText });
+          updated++;
+        }
+      } catch (updateError) {
+        console.error('[Mem0] updateMemoriesForPreference item failed:', updateError?.message || updateError);
+      }
+    }
+
+    return { updated };
+  } catch (error) {
+    console.error('[Mem0] updateMemoriesForPreference failed:', error?.message || error);
+    return { updated: 0 };
+  }
+}
+
 export default {
   isMem0Enabled,
   getMem0Client,
@@ -201,4 +269,5 @@ export default {
   searchMemories,
   getUserMemories,
   buildMem0Context,
+  updateMemoriesForPreference,
 };

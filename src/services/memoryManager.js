@@ -9,7 +9,7 @@ import {
 } from './longTermMemoryService.js';
 // import { extractStructuredMemories } from './langmemCompatibilityService.js';
 import { env } from '../config/env.js';
-import { addTurnMemories, buildMem0Context, isMem0Enabled } from './mem0Service.js';
+import { addTurnMemories, buildMem0Context, isMem0Enabled, updateMemoriesForPreference } from './mem0Service.js';
 
 function providerMode() {
   return env.memoryProvider || 'mem0';
@@ -155,8 +155,11 @@ export async function promoteStructuredMemories({
   return { promoted, promotedItems };
 }
 
+export { updateMemoriesForPreference };
+
 export default {
   retrieveMemory,
   buildLongTermMemoryContext,
   promoteStructuredMemories,
+  updateMemoriesForPreference,
 };

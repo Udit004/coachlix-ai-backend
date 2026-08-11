@@ -4,6 +4,7 @@ import { redis } from '../../shared/cache.js';
 import { processAiChat } from '../../ai_graph/index.js';
 import { emitAiEvent } from '../../services/eventBus.js';
 import { memoryService } from '../../services/memoryService.js';
+import { getSessionMessages, appendSessionMessage, updateSessionSummary } from '../../ai_graph/memory/sessionMemory.js';
 
 async function getConversationHistory(chatId) {
   if (!chatId) {
@@ -77,7 +78,7 @@ export const chatService = {
     }
 
     const [conversationHistory, profile] = await Promise.all([
-      memoryService.buildConversationHistory(userId, sessionId),
+      getSessionMessages(userId, sessionId),
       getUserProfile(userId),
     ]);
 

@@ -20,7 +20,7 @@ import {
   getRecentFacts,
   primeHotCache,
 } from './longTermMemoryService.js';
-import { promoteStructuredMemories } from './memoryManager.js';
+import { promoteStructuredMemories, updateMemoriesForPreference } from './memoryManager.js';
 import {
   canSpendMemoryLlmBudget,
   canSpendMemoryLlmBudgetForUser,
@@ -30,6 +30,58 @@ import {
   isMemoryWorthy,
   heuristicExtractFacts,
 } from './memoryThrottle.js';
+
+const PREFERENCE_TYPE_KEYWORDS = {
+  preference: ['prefer', 'preference', 'diet', 'eat', 'food', 'vegetarian', 'vegan', 'keto', 'paleo', 'gluten', 'dairy', 'allerg', 'avoid', 'like', 'dislike'],
+};
+
+function isPreferenceFact(candidate) {
+  const type = String(candidate.type || '').toLowerCase();
+  if (type === 'preference' || type === 'constraint') return true;
+  const text = String(candidate.fact || '').toLowerCase();
+  return PREFERENCE_TYPE_KEYWORDS.preference.some((kw) => text.includes(kw));
+}
+
+async function syncMem0PreferenceChanges(userId, candidates) {
+  if (env.memoryProvider !== 'mem0' || !candidates?.length) return 0;
+
+  const preferenceCandidates = candidates.filter(isPreferenceFact);
+  if (!preferenceCandidates.length) return 0;
+
+  const mem0PrefCandidates = preferenceCandidates.filter((c) =>
+    /vegetarian|vegan|keto|paleo|gluten|dairy|allerg|avoid|prefer/i.test(c.fact || '')
+  );
+  if (!mem0PrefCandidates.length) return 0;
+
+  const newPreferenceText = mem0PrefCandidates[0].fact || '';
+  const match = newPreferenceText.match(/(vegetarian|vegan|keto|paleo|gluten.?free|dairy.?free|pescatarian|high.?protein|low.?carb|intermittent fasting)/i);
+  if (!match) return 0;
+
+  const newPref = match[1].toLowerCase();
+  const oldPatterns = ['vegetarian', 'vegan', 'keto', 'paleo', 'gluten free', 'dairy free', 'pescatarian', 'high protein', 'low carb'];
+  const explicitOldPref = oldPatterns.find((p) => p !== newPref && newPreferenceText.toLowerCase().includes(p));
+
+  if (explicitOldPref) {
+    const result = await updateMemoriesForPreference(userId, explicitOldPref, newPref);
+    return result.updated || 0;
+  }
+
+  const { searchMemories } = await import('./mem0Service.js');
+  const existing = await searchMemories(userId, 'dietary preference', 3);
+  const oldMemory = existing?.results?.find((r) =>
+    r.content && /vegetarian|vegan|keto|paleo|gluten.?free|dairy.?free|pescatarian|high.?protein|low.?carb/i.test(r.content)
+  );
+
+  if (!oldMemory) return 0;
+
+  const oldMatch = oldMemory.content.match(/(vegetarian|vegan|keto|paleo|gluten.?free|dairy.?free|pescatarian|high.?protein|low.?carb)/i);
+  const oldPref = oldMatch ? oldMatch[1].toLowerCase() : null;
+  if (!oldPref || oldPref === newPref) return 0;
+
+  const result = await updateMemoriesForPreference(userId, oldPref, newPref);
+  return result.updated || 0;
+}
+
 
 const EXTRACTION_PROMPT = `You are a memory extraction agent for Coachlix, an AI fitness coach.
 Read the conversation transcript and extract STABLE, durable facts worth remembering across sessions.
@@ -138,12 +190,14 @@ export async function runMemoryPromotion(session) {
   // Try cheap heuristic extraction first (no LLM call). If it captures the
   // common Coachlix patterns, we can skip the LLM entirely.
   let candidates = heuristicExtractFacts(messages);
+  await syncMem0PreferenceChanges(userId, candidates);
 
   // Only fall back to the LLM when heuristic found nothing AND we still have
   // budget for a memory LLM call this minute.
   if (candidates.length === 0) {
     if (await canSpendMemoryLlmBudget()) {
       candidates = await extractFacts(transcript);
+      await syncMem0PreferenceChanges(userId, candidates);
     }
   }
 

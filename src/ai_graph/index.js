@@ -19,6 +19,14 @@ export {
 } from "./memory/chatMemory.js";
 
 export {
+  getSessionMessages,
+  appendSessionMessage,
+  getSessionSummary,
+  updateSessionSummary,
+  buildClassifierContext,
+} from "./memory/sessionMemory.js";
+
+export {
   analyzeIntent,
 } from "./reasoning/intentClassifierV2.js";
 

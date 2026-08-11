@@ -14,6 +14,10 @@ import {
 import { getContextStats } from "../search/semanticMemoryRetrieval.js";
 import { emitAiEvent } from "../../services/eventBus.js";
 import { initMcpClient } from "../mcp/mcpClient.js";
+import {
+  appendSessionMessage,
+  updateSessionSummary,
+} from "../memory/sessionMemory.js";
 
 function projectProfileForClassification(profile) {
   if (!profile || typeof profile !== "object") return null;
@@ -110,6 +114,7 @@ export async function processChatWithGraph(params, onChunk, onEvent) {
     plan = "general",
     profile = null,
     conversationHistory = [],
+    sessionId,
   } = params;
 
   const startTime = Date.now();
@@ -131,6 +136,7 @@ export async function processChatWithGraph(params, onChunk, onEvent) {
   const initialState = {
     messages: [],
     userId,
+    sessionId: sessionId || null,
     originalMessage: message,
     files,
     conversationHistory,
@@ -295,6 +301,16 @@ const graph = getCompiledGraph();
     console.log("[Graph] Tools used:", toolsUsed.join(", ") || "none");
     console.log("[Graph] Google Search:", enableSearchMeta ? "yes" : "no");
     console.log("=".repeat(80) + "\n");
+
+    if (sessionId && userId) {
+      await Promise.all([
+        appendSessionMessage(userId, sessionId, "user", message),
+        appendSessionMessage(userId, sessionId, "assistant", fullResponse),
+        updateSessionSummary(userId, sessionId, { user: message, assistant: fullResponse }),
+      ]).catch((err) => {
+        console.error("[Graph:sessionMemory] Failed to update session memory:", err?.message || err);
+      });
+    }
 
     return {
       response: fullResponse,

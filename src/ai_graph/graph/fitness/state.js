@@ -28,6 +28,7 @@ export const GraphState = Annotation.Root({
   }),
 
   userId: Annotation({ reducer: lastWrite, default: () => "" }),
+  sessionId: Annotation({ reducer: lastWrite, default: () => "" }),
   originalMessage: Annotation({ reducer: lastWrite, default: () => "" }),
   files: Annotation({ reducer: lastWrite, default: () => null }),
   conversationHistory: Annotation({ reducer: lastWrite, default: () => [] }),
