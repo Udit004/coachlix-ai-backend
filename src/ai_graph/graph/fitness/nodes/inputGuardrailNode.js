@@ -6,7 +6,10 @@ const JAILBREAK_PATTERNS = [
   /\b(forget|ignore)\b.*\b(previous|all)\b.*\b(instructions|prompts)\b/i,
   /\bact as\b.*\b(developer|programmer|ai|assistant|expert|system)\b/i,
   /\bwrite\b.*\b(python|javascript|java|c\+\+|code)\b/i,
-  /\b(code|script)\b.*\b(for|adding|calculator|function)\b/i
+  /\b(code|script)\b.*\b(for|adding|calculator|function)\b/i,
+  /\b(system instructions|system prompt|internal rules)\b/i,
+  /\b(novel|story|scene|fictional)\b.*\b(breaks its programming|reveals its)\b/i,
+  /\b(exact dialogue|actual rules)\b/i
 ];
 
 export async function inputGuardrailNode(state) {
