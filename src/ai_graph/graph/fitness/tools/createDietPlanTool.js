@@ -33,9 +33,7 @@ export function createCreateDietPlanTool() {
       dietaryRestrictions: z
         .array(z.string())
         .optional()
-        .describe(
-          "Restrictions such as ['vegetarian', 'gluten-free', 'dairy-free']"
-        ),
+        .describe("Restrictions such as ['vegetarian', 'gluten-free', 'dairy-free'] – **must** be supplied when the user follows a plant‑based diet"),
     }),
     func: async (params) => toolRegistry.create_diet_plan(params),
   });

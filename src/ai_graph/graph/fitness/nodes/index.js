@@ -9,3 +9,4 @@ export { goalNode } from "./goalNode.js";
 export { buildPromptNode } from "./buildPromptNode.js";
 export { llmNode } from "./llmNode.js";
 export { toolsNode } from "./toolsNode.js";
+export { inputGuardrailNode } from "./inputGuardrailNode.js";

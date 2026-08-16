@@ -166,21 +166,27 @@ export function getToolDescriptions() {
 
 6. create_diet_plan - Create new personalized diet plans
    Required args: { userId: string, planName?: string, goal?: string, targetCalories?: number, duration?: number, dietaryRestrictions?: Array }
+   **Always include 'dietaryRestrictions' (e.g. ["vegetarian"]) when the user follows a plant‑based diet.**
 
 7. update_diet_targets - Update daily calorie/macro targets or goal of an existing diet plan
-   Required args: { userId: string, planId?: string, planName?: string, targetCalories?, targetProtein?, targetCarbs?, targetFats?, goal? }
+   Required args: { userId: string, planId?: string, planName?: string, targetCalories?, targetProtein?, targetCarbs?, targetFats?, goal?, dietaryRestrictions?: Array }
+   **Pass the same 'dietaryRestrictions' array so the backend can validate the new items.**
 
 8. replace_diet_day - Replace ALL meals for one specific day of an existing diet plan
-   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, meals: [{type, items:[{name,calories,protein,carbs,fats,quantity?}]}], waterIntake?, notes? }
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, meals: [{type, items:[{name,calories,protein,carbs,fats,quantity?}]}], waterIntake?, notes?, dietaryRestrictions?: Array }
+   **Pass the same 'dietaryRestrictions' array so the backend can validate the new items.**
 
 9. update_diet_meal - Patch a SINGLE meal type on a specific day (other meals untouched)
-   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: "Breakfast"|"Lunch"|"Dinner"|"Snacks"|"Pre-Workout"|"Post-Workout", items: [{name,calories,protein,carbs,fats,quantity?}] }
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: "Breakfast"|"Lunch"|"Dinner"|"Snacks"|"Pre-Workout"|"Post-Workout", items: [{name,calories,protein,carbs,fats,quantity?}], dietaryRestrictions?: Array }
+   **Pass the same 'dietaryRestrictions' array so the backend can validate the new items.**
 
 10. add_diet_food_item - Add a single food item to a specific meal on a specific day
-   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, item: {name,calories,protein,carbs,fats,quantity?} }
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, item: {name,calories,protein,carbs,fats,quantity?}, dietaryRestrictions?: Array }
+   **Pass the same 'dietaryRestrictions' array so the backend can validate the new items.**
 
 11. remove_diet_food_item - Remove a specific food item from a meal on a specific day
-   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, foodName: string }
+   Required args: { userId: string, planId?: string, planName?: string, dayNumber: number, mealType: string, foodName: string, dietaryRestrictions?: Array }
+   **Pass the same 'dietaryRestrictions' array so the backend can validate the new items.**
 
 12. fetch_details - Fetch detailed meal or workout information when user needs specifics
     Required args: { userId: string, type: "diet"|"workout", detail?: "today"|"full"|"specific_day", dayNumber?: number }

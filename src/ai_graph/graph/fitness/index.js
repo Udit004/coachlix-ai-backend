@@ -12,11 +12,14 @@ import {
   buildPromptNode,
   llmNode,
   toolsNode,
+  inputGuardrailNode,
 } from "./nodes/index.js";
 import { routeAfterClassify, shouldContinueToTools } from "./edges.js";
+import { QueryType } from "../../reasoning/intentRouter.js";
 
 export function buildFitnessGraph() {
   const workflow = new StateGraph(GraphState)
+    .addNode("inputGuardrail", inputGuardrailNode)
     .addNode("classify", intentNode)
     .addNode("greeting", greetingNode)
     .addNode("directGeneral", directGeneralNode)
@@ -26,7 +29,14 @@ export function buildFitnessGraph() {
     .addNode("buildPrompt", buildPromptNode)
     .addNode("llm", llmNode)
     .addNode("tools", toolsNode)
-    .addEdge(START, "classify")
+    .addEdge(START, "inputGuardrail")
+    .addConditionalEdges("inputGuardrail", (state) => {
+      if (state.queryType === QueryType.OFF_TOPIC) {
+        console.log("[Graph:route] inputGuardrail -> greeting (blocked)");
+        return "greeting";
+      }
+      return "classify";
+    })
     .addConditionalEdges("classify", routeAfterClassify, {
       greeting: "greeting",
       directGeneral: "directGeneral",

@@ -6,6 +6,19 @@ import DietPlan from "../../models/DietPlan.js";
 import { redis } from "../../lib/redis.js";
 
 /**
+ * Resolve the diet mode for a request.
+ * Priority: explicit restrictions array -> user profile preference -> default 'vegetarian'.
+ */
+function resolveDietMode(profilePref, restrictions) {
+  if (Array.isArray(restrictions) && restrictions.length) {
+    const known = ['vegan','vegetarian','eggetarian','non-vegetarian'];
+    const hit = restrictions.find(r => known.includes(r.toLowerCase()));
+    if (hit) return hit.toLowerCase();
+  }
+  return (profilePref || 'vegetarian').toLowerCase();
+}
+
+/**
  * Invalidate all Redis cache entries for a user's diet plans.
  * Clears both the list variants and any cached individual plan.
  * @param {string} userId - Firebase UID
@@ -101,10 +114,13 @@ export class CreateDietPlanTool extends Tool {
 
       console.log("✅ CreateDietPlanTool: User profile found");
 
-      // Get user's dietary preference and location
-      const userDietaryPreference = user.dietaryPreference || 'non-vegetarian';
+      // Resolve diet mode for this request
+      const dietMode = resolveDietMode(user.dietaryPreference, dietaryRestrictions);
+      const extraRestrictions = (Array.isArray(dietaryRestrictions) ? dietaryRestrictions : [])
+        .filter(r => !['vegan','vegetarian','eggetarian','non-vegetarian'].includes(r.toLowerCase()));
       const userLocation = user.location || '';
-      console.log(`🥗 CreateDietPlanTool: User dietary preference: ${userDietaryPreference}`);
+      console.log(`🥗 CreateDietPlanTool: Resolved diet mode: ${dietMode}`);
+      console.log(`🥗 CreateDietPlanTool: Extra restrictions: ${extraRestrictions.join(', ') || 'none'}`);
       console.log(`🌍 CreateDietPlanTool: User location: ${userLocation}`);
       console.log(`📊 CreateDietPlanTool: Full user data:`, {
         name: user.name,
@@ -172,7 +188,7 @@ export class CreateDietPlanTool extends Tool {
       for (let i = 1; i <= planDuration; i++) {
         days.push({
           dayNumber: i,
-          meals: generateMealsForDay(calories, proteinTarget, carbTarget, fatTarget, userGoal, dietaryRestrictions, userDietaryPreference, userLocation),
+          meals: generateMealsForDay(calories, proteinTarget, carbTarget, fatTarget, userGoal, dietMode, extraRestrictions, userLocation),
           waterIntake: 2.5, // Default 2.5 liters
           notes: `Day ${i} - Stay consistent with your nutrition!`
         });
@@ -296,7 +312,8 @@ export class UpdateDietPlanTool extends Tool {
         removeFoodItem,
         goal,
         isActive,
-        notes
+        notes,
+        dietaryRestrictions
       } = updateData;
 
       if (!userId) {
@@ -470,6 +487,27 @@ export class UpdateDietPlanTool extends Tool {
         console.log(`✅ UpdateDietPlanTool: Removed "${removeFoodItem.foodName}" from ${removeFoodItem.mealType} on day ${removeFoodItem.dayNumber}`);
       }
 
+      // ---- validate new meals/items against user diet ----
+      const userProfile = await User.findOne({ firebaseUid: userId }).lean();
+      const dietMode = resolveDietMode(userProfile?.dietaryPreference, dietaryRestrictions);
+      const extraRestrictions = (Array.isArray(dietaryRestrictions) ? dietaryRestrictions : [])
+        .filter(r => !['vegan','vegetarian','eggetarian','non-vegetarian'].includes(r.toLowerCase()));
+
+      // collect all new items from operations
+      const newItems = [];
+      if (updateDay?.meals) {
+        for (const m of updateDay.meals) newItems.push(...m.items);
+      }
+      if (updateMeal?.items) newItems.push(...updateMeal.items);
+      if (addFoodItem?.item) newItems.push(addFoodItem.item);
+      if (addDay?.meals) {
+        for (const m of addDay.meals) newItems.push(...m.items);
+      }
+      // replaceDay not used in this tool (handled by replace_diet_day wrapper), but keep for safety
+      if (newItems.length) {
+        assertDietCompliance(newItems, dietMode, extraRestrictions);
+      }
+
       // Apply updates
       Object.assign(dietPlan, updates);
       
@@ -562,7 +600,7 @@ function calculateAge(birthDate) {
   return age;
 }
 
-function generateMealsForDay(calories, protein, carbs, fats, goal, restrictions = [], dietaryPreference = 'non-vegetarian', userLocation = '') {
+function generateMealsForDay(calories, protein, carbs, fats, goal, dietMode, extraRestrictions = [], userLocation = '') {
   const meals = [];
   
   // Distribute calories across meals (Breakfast: 30%, Lunch: 35%, Dinner: 25%, Snacks: 10%)
@@ -581,7 +619,7 @@ function generateMealsForDay(calories, protein, carbs, fats, goal, restrictions 
 
     meals.push({
       type,
-      items: generateFoodItems(type, mealCalories, mealProtein, mealCarbs, mealFats, goal, restrictions, dietaryPreference, userLocation),
+      items: generateFoodItems(type, mealCalories, mealProtein, mealCarbs, mealFats, goal, dietMode, extraRestrictions, userLocation),
       totalCalories: mealCalories,
       totalProtein: mealProtein,
       totalCarbs: mealCarbs,
@@ -692,14 +730,30 @@ function validateDietPlan(dietPlan, userProfile) {
     carbPercentage: carbPercentage.toFixed(0)
   };
 }
+  
+/**
+ * Ensure every food item's types array contains the required dietMode or an allowed extra restriction.
+ * Throws if any item is non‑compliant.
+ */
+function assertDietCompliance(items, dietMode, extraRestrictions = []) {
+  const allowed = new Set([dietMode, ...extraRestrictions.map(r => r.toLowerCase())]);
+  for (const it of items) {
+    // Find the food definition in the static database to check its types
+    const match = Object.values(foodDatabase).flat().find(f => f.name.toLowerCase() === it.name.toLowerCase());
+    if (match && !match.types.some(t => allowed.has(t))) {
+      throw new Error(`Food "${it.name}" is not compatible with a ${dietMode} diet`);
+    }
+  }
+}
 
-function generateFoodItems(mealType, calories, protein, carbs, fats, goal, restrictions, dietaryPreference = 'non-vegetarian', userLocation = '') {
+function generateFoodItems(mealType, calories, protein, carbs, fats, goal, dietMode, extraRestrictions = [], userLocation = '') {
   const items = [];
   const isIndian = isIndianUser(userLocation);
   
   console.log(`\n🍽️ generateFoodItems called:`);
   console.log(`  - Meal Type: ${mealType}`);
-  console.log(`  - Dietary Preference: ${dietaryPreference}`);
+  console.log(`  - Diet Mode: ${dietMode}`);
+  console.log(`  - Extra Restrictions: ${extraRestrictions.join(', ') || 'none'}`);
   console.log(`  - Location: ${userLocation}`);
   console.log(`  - Is Indian: ${isIndian}`);
   console.log(`  - Target: ${calories} kcal, ${protein}g protein`);
@@ -778,12 +832,12 @@ function generateFoodItems(mealType, calories, protein, carbs, fats, goal, restr
   // Select appropriate items based on meal type
   let availableFoods = foodDatabase[mealType] || foodDatabase["Snacks"];
   
-  console.log(`🔍 Filtering foods - Preference: ${dietaryPreference}, Region: ${isIndian ? 'Indian' : 'International'}`);
+  console.log(`🔍 Filtering foods - Diet Mode: ${dietMode}, Extra Restrictions: ${extraRestrictions.join(', ') || 'none'}, Region: ${isIndian ? 'Indian' : 'International'}`);
   
-  // Filter foods based on BOTH dietary preference AND region
+  // Filter foods based on dietMode + extraRestrictions AND region
   availableFoods = availableFoods.filter(food => {
-    // Check dietary preference
-    const matchesDiet = food.types && food.types.includes(dietaryPreference);
+    // Check dietary preference: accept if food.types includes dietMode OR any extraRestriction
+    const matchesDiet = food.types && (food.types.includes(dietMode) || extraRestrictions.some(r => food.types.includes(r.toLowerCase())));
     
     // Check region (include 'both' for foods that work in any region)
     const matchesRegion = food.region === 'both' || 

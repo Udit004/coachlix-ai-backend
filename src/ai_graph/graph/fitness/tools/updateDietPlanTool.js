@@ -77,8 +77,12 @@ export function createUpdateDietTargetsTool() {
         .string()
         .optional()
         .describe("Updated goal: weight_loss, muscle_gain, maintenance, cutting, or bulking"),
+      dietaryRestrictions: z
+        .array(z.string())
+        .optional()
+        .describe("Restrictions such as ['vegetarian', 'gluten-free'] – **must** be supplied when the user follows a plant‑based diet"),
     }),
-    func: async ({ userId, planId, planName, targetCalories, targetProtein, targetCarbs, targetFats, goal }) =>
+    func: async ({ userId, planId, planName, targetCalories, targetProtein, targetCarbs, targetFats, goal, dietaryRestrictions }) =>
       toolRegistry.update_diet_plan({
         userId,
         planId,
@@ -89,6 +93,7 @@ export function createUpdateDietTargetsTool() {
         targetCarbs: toNumber(targetCarbs),
         targetFats: toNumber(targetFats),
         goal,
+        dietaryRestrictions,
       }),
   });
 }
@@ -123,8 +128,12 @@ export function createReplaceDayTool() {
         .describe("Complete new meals array for this day (replaces existing meals entirely)"),
       waterIntake: numOrStr().optional().describe("Water intake in litres"),
       notes: z.string().optional().describe("Notes for this day"),
+      dietaryRestrictions: z
+        .array(z.string())
+        .optional()
+        .describe("Restrictions such as ['vegetarian', 'gluten-free'] – **must** be supplied when the user follows a plant‑based diet"),
     }),
-    func: async ({ userId, planId, planName, dayNumber, meals, waterIntake, notes }) =>
+    func: async ({ userId, planId, planName, dayNumber, meals, waterIntake, notes, dietaryRestrictions }) =>
       toolRegistry.update_diet_plan({
         userId,
         planId,
@@ -136,6 +145,7 @@ export function createReplaceDayTool() {
           waterIntake: toNumber(waterIntake),
           notes,
         },
+        dietaryRestrictions,
       }),
   });
 }
@@ -162,8 +172,12 @@ export function createUpdateMealTool() {
       dayNumber: z.number().describe("1-based day index"),
       mealType: mealTypeEnum().describe("Exactly which meal to replace on that day"),
       items: z.array(foodItemSchema()).describe("New food items for this meal (replaces only this meal type)"),
+      dietaryRestrictions: z
+        .array(z.string())
+        .optional()
+        .describe("Restrictions such as ['vegetarian', 'gluten-free'] – **must** be supplied when the user follows a plant‑based diet"),
     }),
-    func: async ({ userId, planId, planName, dayNumber, mealType, items }) =>
+    func: async ({ userId, planId, planName, dayNumber, mealType, items, dietaryRestrictions }) =>
       toolRegistry.update_diet_plan({
         userId,
         planId,
@@ -174,6 +188,7 @@ export function createUpdateMealTool() {
           mealType,
           items,
         },
+        dietaryRestrictions,
       }),
   });
 }
@@ -200,8 +215,12 @@ export function createAddFoodItemTool() {
       dayNumber: z.number().describe("1-based day index"),
       mealType: mealTypeEnum().describe("Meal to add the item to"),
       item: foodItemSchema().describe("The food item to add"),
+      dietaryRestrictions: z
+        .array(z.string())
+        .optional()
+        .describe("Restrictions such as ['vegetarian', 'gluten-free'] – **must** be supplied when the user follows a plant‑based diet"),
     }),
-    func: async ({ userId, planId, planName, dayNumber, mealType, item }) =>
+    func: async ({ userId, planId, planName, dayNumber, mealType, item, dietaryRestrictions }) =>
       toolRegistry.update_diet_plan({
         userId,
         planId,
@@ -218,6 +237,7 @@ export function createAddFoodItemTool() {
             fats: toNumber(item.fats),
           },
         },
+        dietaryRestrictions,
       }),
   });
 }
@@ -244,8 +264,12 @@ export function createRemoveFoodItemTool() {
       dayNumber: z.number().describe("1-based day index"),
       mealType: mealTypeEnum().describe("Meal to remove the item from"),
       foodName: z.string().describe("Name of the food item to remove (case-insensitive match)"),
+      dietaryRestrictions: z
+        .array(z.string())
+        .optional()
+        .describe("Restrictions such as ['vegetarian', 'gluten-free'] – **must** be supplied when the user follows a plant‑based diet"),
     }),
-    func: async ({ userId, planId, planName, dayNumber, mealType, foodName }) =>
+    func: async ({ userId, planId, planName, dayNumber, mealType, foodName, dietaryRestrictions }) =>
       toolRegistry.update_diet_plan({
         userId,
         planId,
@@ -256,6 +280,7 @@ export function createRemoveFoodItemTool() {
           mealType,
           foodName,
         },
+        dietaryRestrictions,
       }),
   });
 }
